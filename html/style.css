@@ -1,0 +1,1044 @@
+/* ============================================================================
+   PolCam HUD Stylesheet
+   Realistic FLIR-Style Police Helicopter Camera Interface
+   Scales properly for 1080p, 1440p, and 4K
+   ============================================================================ */
+
+/* --------------------------------------------------------------------------
+   CSS Variables / Design Tokens
+   -------------------------------------------------------------------------- */
+:root {
+    /* Default white HUD color */
+    --hud-color: #ffffff;
+    --hud-glow: rgba(255, 255, 255, 0.4);
+    --hud-dim: rgba(200, 200, 200, 0.8);
+    --hud-bg: rgba(0, 0, 0, 0.4);
+    --danger-color: #ff4444;
+    --warning-color: #ffaa00;
+
+    --font-hud: 'Share Tech Mono', 'Courier New', monospace;
+
+    --text-shadow: 0 0 4px var(--hud-glow);
+
+    /* Base scaling unit */
+    --scale: 1vmin;
+}
+
+/* Night Vision Theme */
+.nightvision {
+    --hud-color: #ccffcc;
+    --hud-glow: rgba(200, 255, 200, 0.4);
+    --hud-dim: rgba(180, 220, 180, 0.8);
+}
+
+/* High Contrast - Green Theme */
+.highcontrast-green {
+    --hud-color: #00ff00;
+    --hud-glow: rgba(0, 255, 0, 0.6);
+    --hud-dim: rgba(0, 200, 0, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
+/* High Contrast - Black Theme */
+.highcontrast-black {
+    --hud-color: #000000;
+    --hud-glow: rgba(0, 0, 0, 0.4);
+    --hud-dim: rgba(50, 50, 50, 0.9);
+    --hud-bg: rgba(255, 255, 255, 0.3);
+}
+
+
+/* --------------------------------------------------------------------------
+   Base Styles
+   -------------------------------------------------------------------------- */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-hud);
+    color: var(--hud-color);
+    overflow: hidden;
+    background: transparent;
+    user-select: none;
+    text-shadow: var(--text-shadow);
+}
+
+.hidden {
+    display: none !important;
+}
+
+#polcam-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Off-screen tracking cue
+   -------------------------------------------------------------------------- */
+.track-cue {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: calc(var(--scale) * 0.8);
+    padding: calc(var(--scale) * 0.3) calc(var(--scale) * 0.6);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    filter: drop-shadow(0 0 6px var(--hud-glow));
+}
+
+.track-cue.left { left: 1.5%; }
+.track-cue.right { right: 1.5%; flex-direction: row-reverse; }
+
+.track-cue-arrow {
+    width: 0;
+    height: 0;
+    border-top: calc(var(--scale) * 0.8) solid transparent;
+    border-bottom: calc(var(--scale) * 0.8) solid transparent;
+}
+
+.track-cue.left .track-cue-arrow {
+    border-right: calc(var(--scale) * 1.2) solid var(--hud-color);
+}
+
+.track-cue.right .track-cue-arrow {
+    border-left: calc(var(--scale) * 1.2) solid var(--hud-color);
+}
+
+.track-cue-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.track-cue-label {
+    font-size: calc(var(--scale) * 1.3);
+    font-weight: 900;
+    letter-spacing: 1px;
+}
+
+.track-cue-distance {
+    font-size: calc(var(--scale) * 1.1);
+    color: var(--hud-dim);
+}
+
+/* Pilot HUD variant */
+.pilot-track-cue {
+    position: absolute;
+    top: 50%;
+    left: -18px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.pilot-track-cue.right { left: auto; right: -18px; flex-direction: row-reverse; }
+
+.pilot-track-cue-arrow {
+    width: 0;
+    height: 0;
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+}
+
+.pilot-track-cue.left .pilot-track-cue-arrow { border-right: 10px solid #fff; }
+.pilot-track-cue.right .pilot-track-cue-arrow { border-left: 10px solid #fff; }
+
+.pilot-track-cue-text { display: flex; flex-direction: column; line-height: 1.1; }
+.pilot-track-cue-label { font-size: 12px; font-weight: 900; letter-spacing: 1px; }
+.pilot-track-cue-distance { font-size: 11px; opacity: 0.85; }
+
+#polcam-container.hidden {
+    display: none !important;
+}
+
+.hud-fade-in {
+    animation: hudFadeIn 0.8s ease-in-out forwards;
+}
+
+.hud-fade-out {
+    animation: hudFadeOut 0.5s ease-in-out forwards;
+}
+
+@keyframes hudFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes hudFadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   CAMERA CORNERS (White brackets)
+   Fixed alignment + responsive scaling for 1080p to 4K
+   -------------------------------------------------------------------------- */
+.camera-corners {
+    position: absolute;
+    top: 1%;
+    left: 1%;
+    right: 1%;
+    bottom: 1%;
+    pointer-events: none;
+}
+
+.corner {
+    position: absolute;
+    width: calc(var(--scale) * 3);
+    height: calc(var(--scale) * 3);
+    border-color: var(--hud-color);
+    border-style: solid;
+    border-width: 0;
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.corner.top-left {
+    top: 0;
+    left: 0;
+    border-top-width: 1px;
+    border-left-width: 1px;
+}
+
+.corner.top-right {
+    top: 0;
+    right: 0;
+    border-top-width: 1px;
+    border-right-width: 1px;
+}
+
+.corner.bottom-left {
+    bottom: 0;
+    left: 0;
+    border-bottom-width: 1px;
+    border-left-width: 1px;
+}
+
+.corner.bottom-right {
+    bottom: 0;
+    right: 0;
+    border-bottom-width: 1px;
+    border-right-width: 1px;
+}
+
+/* Resolution scaling for 1440p */
+@media (min-height: 1440px) {
+    .camera-corners {
+        top: 1%;
+        left: 1%;
+        right: 1%;
+        bottom: 1%;
+    }
+
+    .corner {
+        width: calc(var(--scale) * 4.5);
+        height: calc(var(--scale) * 4.5);
+    }
+}
+
+/* Resolution scaling for 4K */
+@media (min-height: 2160px) {
+    .camera-corners {
+        top: 1%;
+        left: 1%;
+        right: 1%;
+        bottom: 1%;
+    }
+
+    .corner {
+        width: calc(var(--scale) * 5);
+        height: calc(var(--scale) * 5);
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Panel Base Styles
+   -------------------------------------------------------------------------- */
+.panel {
+    position: absolute;
+    padding: calc(var(--scale) * 0.8) calc(var(--scale) * 1.2);
+    font-size: calc(var(--scale) * 1.3);
+    line-height: 1.4;
+    letter-spacing: 0.5px;
+}
+
+.info-item {
+    display: flex;
+    gap: calc(var(--scale) * 0.8);
+}
+
+.info-label {
+    color: var(--hud-dim);
+    min-width: calc(var(--scale) * 4);
+}
+
+.info-value {
+    color: var(--hud-color);
+    font-weight: bold;
+}
+
+/* --------------------------------------------------------------------------
+   TOP LEFT PANEL - Helicopter Info
+   -------------------------------------------------------------------------- */
+.top-left-panel {
+    top: 1.5%;
+    left: 1.5%;
+}
+
+.agency-name {
+    font-size: calc(var(--scale) * 1.4);
+    font-weight: bold;
+    margin-bottom: calc(var(--scale) * 0.2);
+    color: var(--hud-color);
+}
+
+.location-name {
+    font-size: calc(var(--scale) * 1.2);
+    /* Force theme color (some elements override otherwise) */
+    color: var(--hud-color) !important;
+    margin-bottom: calc(var(--scale) * 0.8);
+}
+
+.heli-info-grid {
+    display: flex;
+    gap: calc(var(--scale) * 2);
+    margin-bottom: calc(var(--scale) * 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   TOP CENTER - Compass Tape
+   -------------------------------------------------------------------------- */
+.compass-container {
+    position: absolute;
+    top: calc(var(--scale) * 1.5);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.compass-heading-box {
+    font-size: calc(var(--scale) * 1.8);
+    font-weight: bold;
+    padding: calc(var(--scale) * 0.4) calc(var(--scale) * 1.2);
+    margin-bottom: calc(var(--scale) * 0.4);
+    background: var(--hud-bg);
+    border: 1px solid var(--hud-color);
+}
+
+.compass-tape-wrapper {
+    position: relative;
+    width: calc(var(--scale) * 40);
+    height: calc(var(--scale) * 2.5);
+    overflow: hidden;
+}
+
+.compass-tape {
+    position: absolute;
+    display: flex;
+    align-items: flex-end;
+    height: 100%;
+    gap: calc(var(--scale) * 1.2);
+    white-space: nowrap;
+    transition: transform 0.1s ease-out;
+}
+
+.compass-tape .tick {
+    font-size: calc(var(--scale) * 1.1);
+    color: var(--hud-dim);
+    text-align: center;
+    min-width: calc(var(--scale) * 2);
+}
+
+.compass-tape .tick.major {
+    font-size: calc(var(--scale) * 1.3);
+    font-weight: bold;
+    color: var(--hud-color);
+}
+
+.compass-tape .tick.minor {
+    font-size: calc(var(--scale) * 0.8);
+    color: var(--hud-dim);
+    opacity: 0.5;
+}
+
+.compass-center-mark {
+    position: absolute;
+    top: calc(var(--scale) * -0.2);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: calc(var(--scale) * 1);
+    color: var(--hud-color);
+}
+
+/* --------------------------------------------------------------------------
+   TOP RIGHT PANEL - Time/Date & Target Info (Integrated Display)
+   -------------------------------------------------------------------------- */
+.top-right-panel {
+    top: 1.5%;
+    right: 1.5%;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    /* Anchor everything with a vertical line on the right */
+    border-right: 2px solid var(--hud-color);
+    padding-right: calc(var(--scale) * 1.2);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.hover-pill {
+    margin-top: calc(var(--scale) * 0.6);
+    padding: calc(var(--scale) * 0.4) calc(var(--scale) * 1.2);
+    border: 1px solid var(--hud-color);
+    background: var(--hud-bg);
+    color: var(--hud-color);
+    font-weight: bold;
+    letter-spacing: 1px;
+    font-size: calc(var(--scale) * 1.0);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.hover-pill.blink {
+    animation: blink 1s infinite;
+}
+
+
+
+.timestamp-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    padding-bottom: calc(var(--scale) * 0.8);
+}
+
+.timestamp-block .time {
+    color: var(--hud-color);
+    font-weight: bold;
+    font-size: calc(var(--scale) * 1.8);
+    letter-spacing: 1px;
+}
+
+.timestamp-block .date {
+    color: var(--hud-dim);
+    font-size: calc(var(--scale) * 1.3);
+}
+
+.target-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    column-gap: calc(var(--scale) * 1.5);
+    row-gap: calc(var(--scale) * 0.2);
+    padding-top: calc(var(--scale) * 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    justify-content: end;
+}
+
+.top-right-panel .info-item {
+    display: flex;
+    gap: calc(var(--scale) * 0.6);
+    justify-content: flex-end;
+    align-items: baseline;
+}
+
+.top-right-panel .info-label {
+    color: var(--hud-dim);
+    font-size: calc(var(--scale) * 1.0);
+    text-align: right;
+}
+
+.top-right-panel .info-value {
+    text-align: right;
+    font-size: calc(var(--scale) * 1.2);
+    font-weight: bold;
+}
+
+/* --------------------------------------------------------------------------
+   CENTER - Crosshair
+   -------------------------------------------------------------------------- */
+.crosshair-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(var(--scale) * 10);
+    height: calc(var(--scale) * 10);
+}
+
+.crosshair {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.lock-x {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(var(--scale) * 2.2);
+    height: calc(var(--scale) * 2.2);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.lock-x::before,
+.lock-x::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 140%;
+    height: 1px;
+    background: var(--hud-color);
+    transform-origin: center;
+}
+
+.lock-x::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.lock-x::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.ch-line {
+    position: absolute;
+    background: var(--hud-color);
+}
+
+.ch-top {
+    top: 0;
+    left: 50%;
+    width: 2px;
+    height: 35%;
+    transform: translateX(-50%);
+}
+
+.ch-bottom {
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    height: 35%;
+    transform: translateX(-50%);
+}
+
+.ch-left {
+    left: 0;
+    top: 50%;
+    width: 35%;
+    height: 2px;
+    transform: translateY(-50%);
+}
+
+.ch-right {
+    right: 0;
+    top: 50%;
+    width: 35%;
+    height: 2px;
+    transform: translateY(-50%);
+}
+
+/* --------------------------------------------------------------------------
+   Lock Progress Bar (Horizontal)
+   -------------------------------------------------------------------------- */
+.lock-progress-bar {
+    position: absolute;
+    bottom: calc(var(--scale) * -3);
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(var(--scale) * 12);
+    height: calc(var(--scale) * 0.5);
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--hud-dim);
+}
+
+.lock-progress-bar.active {
+    display: block !important;
+}
+
+.lock-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--warning-color);
+    transition: width 0.1s linear;
+}
+
+.lock-progress-bar.locked .lock-progress-fill {
+    background: var(--danger-color);
+}
+
+/* --------------------------------------------------------------------------
+   BOTTOM LEFT - Mode Indicators
+   -------------------------------------------------------------------------- */
+.bottom-left-panel {
+    bottom: 1.5%;
+    left: 1.5%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: calc(var(--scale) * 0.6) calc(var(--scale) * 2.5);
+    width: calc(var(--scale) * 32);
+}
+
+.mode-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: calc(var(--scale) * 1.3);
+}
+
+.mode-label {
+    color: var(--hud-color);
+    font-weight: bold;
+}
+
+.mode-value {
+    color: var(--hud-dim);
+}
+
+.spotlight-active {
+    color: var(--warning-color) !important;
+}
+
+.hover-active,
+.orbit-active,
+.groundlock-active {
+    color: var(--hud-color) !important;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+
+    0%,
+    60% {
+        opacity: 1;
+    }
+
+    61%,
+    100% {
+        opacity: 0.4;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   BOTTOM CENTER - Gimbal Display (Split Halo)
+   -------------------------------------------------------------------------- */
+.gimbal-display {
+    position: absolute;
+    bottom: 2%;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: calc(var(--scale) * 6);
+    pointer-events: none;
+}
+
+.halo-container {
+    position: relative;
+    width: calc(var(--scale) * 11);
+    height: calc(var(--scale) * 11);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.halo-svg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.halo-ring {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 1;
+}
+
+.halo-marker {
+    fill: var(--hud-color);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.halo-arrow {
+    fill: var(--hud-color);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.halo-arc {
+    fill: none;
+    stroke: var(--hud-color);
+    stroke-width: 3;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 3px var(--hud-glow));
+}
+
+.halo-track {
+    fill: none;
+    stroke: var(--hud-dim);
+    stroke-width: 2;
+    stroke-linecap: round;
+    opacity: 0.3;
+}
+
+.halo-marker-dot {
+    fill: var(--hud-color);
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.halo-data {
+    text-align: center;
+    z-index: 10;
+}
+
+.halo-value {
+    display: block;
+    font-size: calc(var(--scale) * 2.0);
+    font-weight: bold;
+    color: var(--hud-color);
+    line-height: 1;
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+.halo-label {
+    display: block;
+    font-size: calc(var(--scale) * 0.8);
+    color: var(--hud-dim);
+    letter-spacing: 1px;
+    margin-top: calc(var(--scale) * 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   BOTTOM RIGHT - Status
+   -------------------------------------------------------------------------- */
+.bottom-right-panel {
+    bottom: 1.5%;
+    right: 1.5%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: calc(var(--scale) * 0.6) calc(var(--scale) * 2.5);
+    width: calc(var(--scale) * 35);
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: calc(var(--scale) * 1.3);
+}
+
+.status-label {
+    color: var(--hud-dim);
+}
+
+.status-value {
+    color: var(--hud-color);
+    font-weight: bold;
+}
+
+/* --------------------------------------------------------------------------
+   Lock Indicator
+   -------------------------------------------------------------------------- */
+.lock-indicator {
+    position: absolute;
+    bottom: calc(var(--scale) * 12);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: calc(var(--scale) * 0.6) calc(var(--scale) * 1.6);
+    font-size: calc(var(--scale) * 1.2);
+    font-weight: bold;
+    color: var(--warning-color);
+    border: 1px solid var(--warning-color);
+    background: rgba(255, 170, 0, 0.1);
+    animation: pulse 0.5s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   POI Markers
+   -------------------------------------------------------------------------- */
+.poi-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.poi-marker {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform: translate(-50%, -50%);
+}
+
+.poi-icon {
+    width: calc(var(--scale) * 1.6);
+    height: calc(var(--scale) * 1.6);
+    background: var(--warning-color);
+    border: 2px solid var(--hud-color);
+    border-radius: 50%;
+}
+
+.poi-distance {
+    margin-top: calc(var(--scale) * 0.4);
+    font-size: calc(var(--scale) * 1);
+    color: var(--hud-color);
+}
+
+/* --------------------------------------------------------------------------
+   Vision Mode Filters
+   -------------------------------------------------------------------------- */
+.nightvision #polcam-container {
+    filter: brightness(1.3) saturate(0) contrast(1.1);
+}
+
+
+
+
+/* --------------------------------------------------------------------------
+   PILOT HUD - Tracking Info when camera off
+   -------------------------------------------------------------------------- */
+#pilot-hud {
+    position: fixed;
+    top: 3%;
+    right: 3%;
+    width: auto;
+    min-width: calc(var(--scale) * 20);
+    padding-right: calc(var(--scale) * 1.5);
+    background: none;
+    backdrop-filter: none;
+    border: none;
+    border-right: 2px solid var(--hud-color);
+    border-radius: 0;
+    box-shadow: none;
+    z-index: 2000;
+    font-family: var(--font-hud);
+    color: var(--hud-color);
+    text-shadow: var(--text-shadow);
+    text-align: right;
+    filter: drop-shadow(0 0 2px var(--hud-glow));
+}
+
+/* Hover is now integrated into Pilot HUD */
+
+.hover-label {
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+.hover-alt {
+    font-weight: normal;
+    color: var(--hud-dim);
+    font-size: calc(var(--scale) * 0.95);
+    letter-spacing: 0.5px;
+}
+
+/* Smaller, cleaner hover altitude readout */
+#pilot-hover-altitude {
+    color: var(--hud-dim);
+    font-size: calc(var(--scale) * 0.95);
+}
+
+#pilot-hover-altitude::after {
+    content: " ALT";
+    color: var(--hud-dim);
+    opacity: 0.9;
+}
+
+#pilot-hover-indicator {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: calc(var(--scale) * 0.6);
+    width: 100%;
+}
+
+#pilot-hud.top-left #pilot-hover-indicator {
+    justify-content: flex-start;
+}
+
+/* Keep altitude snug against the button */
+#pilot-hover-altitude {
+    transform: translateY(1px);
+}
+
+#pilot-hover-label {
+    /* Make it feel like a cockpit annunciator/button */
+    border-radius: calc(var(--scale) * 0.25);
+    box-shadow: 0 0 calc(var(--scale) * 0.6) rgba(255, 170, 0, 0.25);
+}
+
+/* Only blink when JS adds .blink to the container */
+#pilot-hover-label {
+    animation: none;
+}
+
+#pilot-hover-indicator.blink #pilot-hover-label {
+    animation: blink 1s infinite;
+}
+
+.hover-alt-small {
+    font-weight: normal;
+    color: var(--hud-color);
+    font-size: calc(var(--scale) * 1.0);
+    margin-left: calc(var(--scale) * 0.4);
+}
+
+
+#pilot-hud.hidden {
+    display: none !important;
+}
+
+#pilot-hud.top-left {
+    right: auto;
+    left: 3%;
+    text-align: left;
+    border-right: none;
+    border-left: 2px solid var(--hud-color);
+    padding-right: 0;
+    padding-left: calc(var(--scale) * 1.5);
+}
+
+.pilot-hud-content {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--scale) * 0.3);
+}
+
+.pilot-hud-header {
+    font-size: calc(var(--scale) * 1.0);
+    color: var(--hud-dim);
+    letter-spacing: 1.5px;
+    margin-bottom: calc(var(--scale) * 0.2);
+    text-transform: uppercase;
+}
+
+.pilot-hud-identity {
+    font-size: calc(var(--scale) * 1.8);
+    font-weight: bold;
+    color: var(--hud-color);
+}
+
+.pilot-hud-details {
+    font-size: calc(var(--scale) * 1.3);
+    color: var(--warning-color);
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.pilot-hud-postal {
+    font-size: calc(var(--scale) * 1.4);
+    font-weight: bold;
+    color: var(--hud-color);
+}
+
+.pilot-hud-postal::before {
+    content: "POSTAL ";
+    color: var(--hud-dim);
+}
+
+.pilot-hud-location {
+    font-size: calc(var(--scale) * 1.3);
+    color: var(--hud-color);
+}
+
+.pilot-hud-heading {
+    font-size: calc(var(--scale) * 1.1);
+    color: var(--hud-dim);
+}
+
+.pilot-hud-distance {
+    font-size: calc(var(--scale) * 1.4);
+    font-weight: bold;
+    color: var(--hud-color);
+}
+
+.pilot-hud-distance::before {
+    content: "DIST ";
+    font-size: calc(var(--scale) * 1.0);
+    color: var(--hud-dim);
+    font-weight: normal;
+}
+
+.pilot-hud-status {
+    margin-top: calc(var(--scale) * 0.4);
+}
+
+.spot-label {
+    font-size: calc(var(--scale) * 1.2);
+    font-weight: bold;
+    color: var(--warning-color);
+    border: 1px solid var(--warning-color);
+    padding: calc(var(--scale) * 0.15) calc(var(--scale) * 0.6);
+    background: rgba(255, 170, 0, 0.1);
+    letter-spacing: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Postal Code Display
+   -------------------------------------------------------------------------- */
+.postal-code {
+    font-size: calc(var(--scale) * 1.4);
+    font-weight: bold;
+    color: var(--hud-color);
+    margin-bottom: calc(var(--scale) * 0.5);
+    padding: calc(var(--scale) * 0.2) calc(var(--scale) * 0.6);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--hud-dim);
+    display: inline-block;
+}
+
+.postal-code::before {
+    content: "POSTAL ";
+    color: var(--hud-dim);
+}
+
+/* --------------------------------------------------------------------------
+   Rappel Indicator
+   -------------------------------------------------------------------------- */
+.rappel-available {
+    color: #44ff44 !important;
+    font-weight: bold;
+    animation: blink 1s infinite;
+}
