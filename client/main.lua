@@ -455,7 +455,7 @@ local function RegisterKeybinds()
     if Config.HeliControl and Config.HeliControl.OrbitEnabled then
         RegisterKeyMapping('polcam_orbit', 'PolCam: Toggle Orbit Mode', 'keyboard', Config.Keybinds.ToggleOrbit)
         RegisterCommand('polcam_orbit', function()
-            if PolCam.Active and ToggleOrbitMode then
+            if ToggleOrbitMode and (PolCam.Active or (IsHeliTrackingActive and IsHeliTrackingActive())) then
                 ToggleOrbitMode()
             end
         end, false)
@@ -1613,6 +1613,7 @@ function UpdatePilotHUD()
     -- Target ID (Plate or Name) and Details
     local targetId = "SYSTEM"
     local targetDetails = nil
+    local hoverAltitude = nil
 
     if targetInfo and targetInfo.type == "vehicle" then
         targetId = "VEHICLE: " .. (targetInfo.plate or "-------")
@@ -1625,6 +1626,15 @@ function UpdatePilotHUD()
         end
     elseif hoverActive then
         targetDetails = "HOVER MODE"
+        if HeliControl and HeliControl.HoverAltitudeDisplay then
+            hoverAltitude = HeliControl.HoverAltitudeDisplay
+        else
+            local heli = PolCam.CurrentVehicle
+            if heli and DoesEntityExist(heli) then
+                local coords = GetEntityCoords(heli)
+                hoverAltitude = floor(coords.z * 3.28084) .. " FT"
+            end
+        end
     end
     
     SendNUIMessage({
@@ -1641,6 +1651,7 @@ function UpdatePilotHUD()
 
             -- Used by NUI to show hover indicator while camera is off.
             hoverActive = hoverActive,
+            hoverAltitude = hoverAltitude,
 
             -- Ensure NUI can apply correct theme even if camera UI never opened.
             highContrast = {

@@ -2,9 +2,7 @@
     PolCam Configuration - Police Helicopter Camera System
     Customize all heli, camera, and tracking behaviors here.
 ]]
-
 Config = {}
-
 -- CORE SETTINGS
 Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }
@@ -47,9 +45,10 @@ Config.Tracking = {
     UsePoolFallbackTargeting = true, PlateVisibilityAngle = 45.0,
     OcclusionEnabled = true,
     OcclusionGracePeriodMs = 3000,
-    OcclusionCheckIntervalMs = 150,
+    OcclusionCheckIntervalMs = 150, 
     OcclusionNearTargetTolerance = 2.0,
 }
+
 
 -- UI SETTINGS
 Config.UI = {
@@ -59,6 +58,8 @@ Config.UI = {
         ShowWhilePersistent = true, MaxDistance = 1500.0,
         HeightOffsetPed = 1.0, HeightOffsetVehicle = 1.6,
         LabelSmoothingSpeed = 12.0,
+        Color = {0, 255, 0, 230}, -- over-riden if followhighcontrast is true
+        FollowHighContrast = true,
     },
     HighContrast = { Enabled = true, Theme = "blue" }, -- Options: green, black, orange, red, purple, blue, pink OR a Hex Code (e.g. "#FF00FF")
 }
@@ -76,6 +77,7 @@ Config.CameraLabels = {
         ["maverick"] = "SAN ANDREAS STATE POLICE",
     },
     LiveryLabels = { ["polmav"] = { [0] = "LSPD", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" } },
+    LiveryLabels = { ["gsd11bell"] = { [0] = "SAN ANDREAS STATE TROOPER", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" } },
 }
 
 -- FEATURES
@@ -97,6 +99,20 @@ Config.HeliControl = {
     HoverEnabled = true, OrbitEnabled = true, MinOrbitRadius = 30.0,
     HoverMaxDrift = 0.45, HoverZStiffness = 2.0, HoverBrakeFactor = 1.0,
     MinAirborneHeight = 2.0,
+    OrbitRadialStiffness = 1.2,
+    OrbitRadialDamping = 0.6,
+    OrbitVelocitySmoothing = 2.2,
+    OrbitMinTangentScale = 0.55,
+    OrbitRadialMaxCorrection = 12.0,
+    OrbitMaxAccel = 8.0,
+    OrbitCenterLerp = 2.0,
+    OrbitHeadingSmoothing = 2.2,
+    OrbitSwayAmplitude = 1.6,
+    OrbitSwayFrequency = 0.55,
+    OrbitSwayTangentBias = 1.25,
+    OrbitSwayRadialBias = 0.9,
+    OrbitSwayGustAmplitude = 0.85,
+    OrbitSwayGustFrequency = 0.22,
     MinEngineHealth = 100.0, MinBodyHealth = 100.0, AvionicsDamagedMessage = true,
 }
 
@@ -139,12 +155,12 @@ Config.Sounds = {
     SpotlightOff = { audioBank = "DLC_XM_FACILITY_AMBIENT_SOUNDS", audioName = "Deactivate_Privacy_Glass" },
     
     -- Hover mode
-    HoverOn = { audioBank = "DLC_GR_Steal_Railguns_Sounds", audioName = "Hack_Success" },
+    HoverOn = { audioBank = "DLC_GR_Steal_Railguns_Sounds", audioName = "Hack_Success" }, 
     HoverOff = { audioBank = "DLC_Biker_Computer_Sounds", audioName = "Exit" },
     
     -- Orbit mode
-    OrbitOn = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "SELECT" },
-    OrbitOff = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "BACK" },
+    OrbitOn = { audioBank = "DLC_sum20_Business_Battle_AC_Sounds", audioName = "Hack_Success" },
+    OrbitOff = { audioBank = "DLC_sum20_Business_Battle_AC_Sounds", audioName = "Hack_Failure" },
     
     -- Ground lock
     GroundLockOn = { audioBank = "DLC_HEIST_HACKING_SNAKE_SOUNDS", audioName = "HACKING_SUCCESS" },

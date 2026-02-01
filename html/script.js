@@ -225,6 +225,10 @@ function showHUD(data) {
     if (data.highContrast) {
         setHighContrast(data.highContrast.enabled, data.highContrast.theme);
     }
+
+    if (data.trackColors) {
+        applyTrackColors(data.trackColors);
+    }
 }
 
 function hideHUD() {
@@ -714,6 +718,10 @@ function updatePilotHUD(data, config) {
         setHighContrast(data.highContrast.enabled, data.highContrast.theme);
     }
 
+    if (data.trackColors) {
+        applyTrackColors(data.trackColors);
+    }
+
     // Apply configuration
     if (config) {
         if (config.Position === 'top-left') {
@@ -760,13 +768,46 @@ function updatePilotHUD(data, config) {
     // Allow Lua Pilot HUD updates to drive the hover indicator while camera is off.
     // (This covers the case: hovering + no target lock.)
     if (data.hoverActive !== undefined) {
-        setHoverStatus(!!data.hoverActive);
+        setHoverStatus(!!data.hoverActive, data.hoverAltitude);
     }
 
     if (Elements.pilotSpotlightIndicator) {
         Elements.pilotSpotlightIndicator.classList.toggle('hidden', !data.spotlightActive);
     }
 
+}
+
+function applyTrackColors(trackColors) {
+    if (trackColors.FollowTheme) {
+        const styles = getComputedStyle(document.body);
+        const hudColor = styles.getPropertyValue('--hud-color').trim();
+        const hudDim = styles.getPropertyValue('--hud-dim').trim();
+
+        if (hudColor) {
+            document.body.style.setProperty('--track-text-color', hudColor);
+        } else {
+            document.body.style.removeProperty('--track-text-color');
+        }
+
+        if (hudDim) {
+            document.body.style.setProperty('--track-dim-color', hudDim);
+        } else {
+            document.body.style.removeProperty('--track-dim-color');
+        }
+        return;
+    }
+
+    if (trackColors.Color) {
+        document.body.style.setProperty('--track-text-color', trackColors.Color);
+    } else {
+        document.body.style.removeProperty('--track-text-color');
+    }
+
+    if (trackColors.DimColor) {
+        document.body.style.setProperty('--track-dim-color', trackColors.DimColor);
+    } else {
+        document.body.style.removeProperty('--track-dim-color');
+    }
 }
 
 function hidePilotHUD() {

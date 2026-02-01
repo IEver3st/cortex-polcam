@@ -20,6 +20,9 @@ local IsControlPressed = IsControlPressed
 local GetVehicleEngineHealth = GetVehicleEngineHealth
 local GetVehicleBodyHealth = GetVehicleBodyHealth
 local IsVehicleEngineOn = IsVehicleEngineOn
+local GetHeadingFromVector_2d = GetHeadingFromVector_2d
+local GetEntityHeading = GetEntityHeading
+local SetEntityHeading = SetEntityHeading
 
 local math_sqrt = math.sqrt
 local math_floor = math.floor
@@ -88,15 +91,62 @@ local HeliControl = {
     OrbitRadius = 100.0,
     OrbitAltitude = 0,
     OrbitSpeed = 15.0,
+    OrbitAngle = nil,
+    OrbitDirection = 1,
+    OrbitAngularSpeed = 0,
+    OrbitLastTick = 0,
     HoverCoords = nil,
     HoverHeading = 0,
     HoverTargetZ = 0,
-    HoverAltitudeDisplay = 0
+    HoverAltitudeDisplay = 0,
+    LastAltUpdate = 0
 }
+
+local function ApplyAltitudeHold(heli, targetZ, stiffness, velX, velY)
+    local coords = GetEntityCoords(heli)
+    local zError = targetZ - coords.z
+    local zCorrection = zError * stiffness
+    SetEntityVelocity(heli, velX, velY, zCorrection)
+    if SetHeliBladesFullSpeed then
+        SetHeliBladesFullSpeed(heli)
+    end
+    return coords
+end
+
+local function UpdateAltitudeDisplay(currentTime, targetZ)
+    local interval = 200
+    if currentTime - (HeliControl.LastAltUpdate or 0) >= interval then
+        HeliControl.HoverAltitudeDisplay = FormatAltitude(targetZ)
+        SendNUIMessage({
+            action = "hoverAltitude",
+            altitude = HeliControl.HoverAltitudeDisplay
+        })
+        HeliControl.LastAltUpdate = currentTime
+    end
+end
+
+local function LerpVector3(a, b, t)
+    return vector3(
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t
+    )
+end
+
+local function SmoothHeading(currentHeading, targetHeading, smoothing, dt)
+    local delta = ((targetHeading - currentHeading + 540) % 360) - 180
+    local t = dt * smoothing
+    if t > 1 then t = 1 end
+    return (currentHeading + (delta * t)) % 360
+end
 
 function SetHoverAltitude(altitudeFT)
     local ped = PlayerPedId()
     local heli = PolCam.CurrentVehicle
+
+    if HeliControl.OrbitMode then
+        return
+    end
 
     if not (heli and DoesEntityExist(heli)) then
         heli = GetVehiclePedIsIn(ped, false)
@@ -231,8 +281,15 @@ function DeactivateHover()
 end
 
 function ToggleOrbitMode()
-    if not PolCam.Active then return end
-    if not PolCam.CurrentVehicle or not DoesEntityExist(PolCam.CurrentVehicle) then return end
+    if not PolCam.Active and not (IsHeliTrackingActive and IsHeliTrackingActive()) then return end
+    if not PolCam.CurrentVehicle or not DoesEntityExist(PolCam.CurrentVehicle) then
+        local ped = PlayerPedId()
+        local vehicle = GetVehiclePedIsIn(ped, false)
+        if vehicle == 0 or GetVehicleClass(vehicle) ~= 15 then
+            return
+        end
+        PolCam.CurrentVehicle = vehicle
+    end
     
     local ped = PlayerPedId()
     local driver = GetPedInVehicleSeat(PolCam.CurrentVehicle, -1)
@@ -278,21 +335,14 @@ function ActivateOrbit()
     end
     
     HeliControl.OrbitAltitude = heliCoords.z
+    HeliControl.HoverTargetZ = HeliControl.OrbitAltitude
+    HeliControl.OrbitAngle = math.atan2(dy, dx)
+    HeliControl.OrbitAngularSpeed = (HeliControl.OrbitSpeed or 15.0) / HeliControl.OrbitRadius
+    HeliControl.OrbitLastTick = GetGameTimer()
+    HeliControl.OrbitDirection = 1
     
     HeliControl.OrbitMode = true
     HeliControl.HoverMode = true
-    
-    TaskVehicleHeliProtect(
-        ped,
-        heli,
-        HeliControl.OrbitCenter.x,
-        HeliControl.OrbitCenter.y,
-        HeliControl.OrbitCenter.z,
-        HeliControl.OrbitRadius,
-        HeliControl.OrbitAltitude - HeliControl.OrbitCenter.z,
-        HeliControl.OrbitSpeed,
-        0
-    )
     
     if PlayPolCamSound then
         PlayPolCamSound("OrbitOn")
@@ -313,12 +363,12 @@ function DeactivateOrbit()
     local ped = PlayerPedId()
     
     HeliControl.OrbitMode = false
+    HeliControl.OrbitAngle = nil
+    HeliControl.OrbitAngularSpeed = 0
+    HeliControl.OrbitLastTick = 0
     
     if HeliControl.HoverMode then
-        local heli = PolCam.CurrentVehicle
-        if heli and DoesEntityExist(heli) then
-            HeliControl.HoverCoords = GetEntityCoords(heli)
-        end
+        DeactivateHover()
     else
         ClearPedTasks(ped)
     end
@@ -337,9 +387,6 @@ function DeactivateOrbit()
 end
 
 CreateThread(function()
-    local lastAltUpdate = 0
-    local ALT_UPDATE_INTERVAL = 200
-    
     while true do
         local wait = 500
         local currentTime = GetGameTimer()
@@ -360,35 +407,21 @@ CreateThread(function()
                     
                     local coords = GetEntityCoords(heli)
                     local velocity = GetEntityVelocity(heli)
-                    
+
                     local targetZ = HeliControl.HoverTargetZ or coords.z
-                    local zError = targetZ - coords.z
-                    local zCorrection = zError * (Config.HeliControl and Config.HeliControl.HoverZStiffness or 2.0)
-                    
                     local brake = (Config.HeliControl and Config.HeliControl.HoverBrakeFactor) or 0.98
                     local newVelX = velocity.x
                     local newVelY = velocity.y
-                    
+
                     local inputting = IsControlPressed(0, 32) or IsControlPressed(0, 33) or IsControlPressed(0, 34) or IsControlPressed(0, 35)
                     if not inputting then
                         newVelX = newVelX * brake
                         newVelY = newVelY * brake
                     end
-                    
-                    SetEntityVelocity(heli, newVelX, newVelY, zCorrection)
-                    
-                    if SetHeliBladesFullSpeed then
-                        SetHeliBladesFullSpeed(heli)
-                    end
 
-                    if currentTime - lastAltUpdate >= ALT_UPDATE_INTERVAL then
-                        HeliControl.HoverAltitudeDisplay = FormatAltitude(targetZ)
-                        SendNUIMessage({
-                            action = "hoverAltitude",
-                            altitude = HeliControl.HoverAltitudeDisplay
-                        })
-                        lastAltUpdate = currentTime
-                    end
+                    local zStiffness = (Config.HeliControl and Config.HeliControl.HoverZStiffness) or 2.0
+                    ApplyAltitudeHold(heli, targetZ, zStiffness, newVelX, newVelY)
+                    UpdateAltitudeDisplay(currentTime, targetZ)
                 end
             end
         end
@@ -399,11 +432,10 @@ end)
 
 CreateThread(function()
     while true do
-        Wait(1000)
-        
+        local wait = 250
         if HeliControl.OrbitMode and PolCam.Active then
+            wait = 20
             local heli = PolCam.CurrentVehicle
-            
             if not CheckAvionicsHealth(heli) then
                 ShowAvionicsDamagedNotification()
                 DeactivateOrbit()
@@ -411,34 +443,137 @@ CreateThread(function()
                 if Config.Debug and Config.Debug.Enabled then
                     print("[PolCam] Orbit disabled: Avionics damaged during flight")
                 end
-            elseif PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
-                local targetCoords = GetEntityCoords(PolCam.LockedTarget)
-                local dx = targetCoords.x - HeliControl.OrbitCenter.x
-                local dy = targetCoords.y - HeliControl.OrbitCenter.y
-                local movement = math.sqrt(dx * dx + dy * dy)
-                
-                if movement > 20.0 then
-                    HeliControl.OrbitCenter = targetCoords
-                    
-                    local ped = PlayerPedId()
-                    local heli = PolCam.CurrentVehicle
-                    
-                    if heli and DoesEntityExist(heli) then
-                        TaskVehicleHeliProtect(
-                            ped,
-                            heli,
-                            HeliControl.OrbitCenter.x,
-                            HeliControl.OrbitCenter.y,
-                            HeliControl.OrbitCenter.z,
-                            HeliControl.OrbitRadius,
-                            HeliControl.OrbitAltitude - HeliControl.OrbitCenter.z,
-                            HeliControl.OrbitSpeed,
-                            0
-                        )
+            elseif heli and DoesEntityExist(heli) then
+                local currentTime = GetGameTimer()
+                local lastTick = HeliControl.OrbitLastTick or currentTime
+                local dt = (currentTime - lastTick) / 1000
+                if dt <= 0 then dt = 0.02 end
+                HeliControl.OrbitLastTick = currentTime
+
+                if PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
+                    local targetCoords = GetEntityCoords(PolCam.LockedTarget)
+                    if HeliControl.OrbitCenter then
+                        local lerpSpeed = (Config.HeliControl and Config.HeliControl.OrbitCenterLerp) or 2.0
+                        local t = dt * lerpSpeed
+                        if t > 1 then t = 1 end
+                        HeliControl.OrbitCenter = LerpVector3(HeliControl.OrbitCenter, targetCoords, t)
+                    else
+                        HeliControl.OrbitCenter = targetCoords
                     end
+                end
+
+                local center = HeliControl.OrbitCenter
+                if center then
+                    local coords = GetEntityCoords(heli)
+                    local dx = coords.x - center.x
+                    local dy = coords.y - center.y
+                    local currentRadius = math.sqrt(dx * dx + dy * dy)
+                    if currentRadius < 1.0 then currentRadius = 1.0 end
+                    if HeliControl.OrbitRadius < Config.HeliControl.MinOrbitRadius then
+                        HeliControl.OrbitRadius = Config.HeliControl.MinOrbitRadius
+                    end
+
+                    if not HeliControl.OrbitAngle then
+                        HeliControl.OrbitAngle = math.atan2(dy, dx)
+                    end
+
+                    local vel = GetEntityVelocity(heli)
+                    if HeliControl.OrbitDirection == 1 and math.abs(vel.x) + math.abs(vel.y) > 0.2 then
+                        local cross = dx * vel.y - dy * vel.x
+                        if cross < -0.1 then
+                            HeliControl.OrbitDirection = -1
+                        end
+                    end
+
+                    local orbitSpeed = HeliControl.OrbitSpeed or 15.0
+                    local angularSpeed = orbitSpeed / HeliControl.OrbitRadius
+                    HeliControl.OrbitAngularSpeed = angularSpeed
+                    HeliControl.OrbitAngle = HeliControl.OrbitAngle + (angularSpeed * HeliControl.OrbitDirection * dt)
+
+                    local sinA = math.sin(HeliControl.OrbitAngle)
+                    local cosA = math.cos(HeliControl.OrbitAngle)
+                    local tangentX = -sinA * HeliControl.OrbitDirection
+                    local tangentY = cosA * HeliControl.OrbitDirection
+
+                    local radialX = dx / currentRadius
+                    local radialY = dy / currentRadius
+                    local radialError = currentRadius - HeliControl.OrbitRadius
+                    local radialStiffness = (Config.HeliControl and Config.HeliControl.OrbitRadialStiffness) or 1.2
+                    local radialDamping = (Config.HeliControl and Config.HeliControl.OrbitRadialDamping) or 0.6
+                    local radialVel = (vel.x * radialX) + (vel.y * radialY)
+                    local radialCorrection = (-radialError * radialStiffness) - (radialVel * radialDamping)
+
+                    local errorRatio = math.abs(radialError) / HeliControl.OrbitRadius
+                    local minTangentScale = (Config.HeliControl and Config.HeliControl.OrbitMinTangentScale) or 0.55
+                    local tangentScale = 1.0 - math.min(errorRatio, 0.7)
+                    if tangentScale < minTangentScale then tangentScale = minTangentScale end
+
+                    local maxRadialCorrection = (Config.HeliControl and Config.HeliControl.OrbitRadialMaxCorrection) or (orbitSpeed * 0.8)
+                    if radialCorrection > maxRadialCorrection then radialCorrection = maxRadialCorrection end
+                    if radialCorrection < -maxRadialCorrection then radialCorrection = -maxRadialCorrection end
+
+                    local desiredVelX = (tangentX * orbitSpeed * tangentScale) + (radialX * radialCorrection)
+                    local desiredVelY = (tangentY * orbitSpeed * tangentScale) + (radialY * radialCorrection)
+
+                    local swayAmp = (Config.HeliControl and Config.HeliControl.OrbitSwayAmplitude) or 1.1
+                    local swayFreq = (Config.HeliControl and Config.HeliControl.OrbitSwayFrequency) or 0.45
+                    local swayTangent = (Config.HeliControl and Config.HeliControl.OrbitSwayTangentBias) or 1.0
+                    local swayRadial = (Config.HeliControl and Config.HeliControl.OrbitSwayRadialBias) or 0.7
+                    local gustAmp = (Config.HeliControl and Config.HeliControl.OrbitSwayGustAmplitude) or 0.5
+                    local gustFreq = (Config.HeliControl and Config.HeliControl.OrbitSwayGustFrequency) or 0.18
+                    if swayAmp > 0 then
+                        local time = currentTime * 0.001
+                        local base = math.sin((time * swayFreq) + (HeliControl.OrbitAngle * 0.7))
+                            + 0.6 * math.sin((time * swayFreq * 1.7) + 2.1)
+                            + 0.4 * math.cos((time * swayFreq * 0.73) - 1.4)
+                        local gust = math.sin((time * gustFreq) + 1.3) * math.sin((time * gustFreq * 0.37) + 0.7)
+                        local sway = (base * 0.65 + (gust * gustAmp)) * swayAmp
+                        desiredVelX = desiredVelX + (tangentX * sway * swayTangent) + (radialX * sway * swayRadial)
+                        desiredVelY = desiredVelY + (tangentY * sway * swayTangent) + (radialY * sway * swayRadial)
+                    end
+
+                    local smoothing = (Config.HeliControl and Config.HeliControl.OrbitVelocitySmoothing) or 2.2
+                    local lerp = dt * smoothing
+                    if lerp > 1 then lerp = 1 end
+                    local targetVelX = vel.x + (desiredVelX - vel.x) * lerp
+                    local targetVelY = vel.y + (desiredVelY - vel.y) * lerp
+
+                    local maxAccel = (Config.HeliControl and Config.HeliControl.OrbitMaxAccel) or 8.0
+                    local dvX = targetVelX - vel.x
+                    local dvY = targetVelY - vel.y
+                    local dvMag = math.sqrt((dvX * dvX) + (dvY * dvY))
+                    local maxDelta = maxAccel * dt
+                    if dvMag > maxDelta and dvMag > 0 then
+                        local scale = maxDelta / dvMag
+                        dvX = dvX * scale
+                        dvY = dvY * scale
+                    end
+                    local newVelX = vel.x + dvX
+                    local newVelY = vel.y + dvY
+
+                    local maxSpeed = orbitSpeed * 1.25
+                    local horizSpeed = math.sqrt((newVelX * newVelX) + (newVelY * newVelY))
+                    if horizSpeed > maxSpeed then
+                        local scale = maxSpeed / horizSpeed
+                        newVelX = newVelX * scale
+                        newVelY = newVelY * scale
+                    end
+
+                    if horizSpeed > 0.05 then
+                        local targetHeading = GetHeadingFromVector_2d(newVelX, newVelY)
+                        local currentHeading = GetEntityHeading(heli)
+                        local headingSmoothing = (Config.HeliControl and Config.HeliControl.OrbitHeadingSmoothing) or 2.2
+                        local newHeading = SmoothHeading(currentHeading, targetHeading, headingSmoothing, dt)
+                        SetEntityHeading(heli, newHeading)
+                    end
+
+                    local zStiffness = (Config.HeliControl and Config.HeliControl.HoverZStiffness) or 2.0
+                    ApplyAltitudeHold(heli, HeliControl.HoverTargetZ, zStiffness, newVelX, newVelY)
+                    UpdateAltitudeDisplay(currentTime, HeliControl.HoverTargetZ)
                 end
             end
         end
+        Wait(wait)
     end
 end)
 
@@ -493,4 +628,10 @@ end
 
 function IsOrbitActive()
     return HeliControl.OrbitMode
+end
+local function SmoothHeading(currentHeading, targetHeading, smoothing, dt)
+    local delta = ((targetHeading - currentHeading + 540) % 360) - 180
+    local t = dt * smoothing
+    if t > 1 then t = 1 end
+    return (currentHeading + (delta * t)) % 360
 end

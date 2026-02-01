@@ -1386,6 +1386,34 @@ local function ShouldDrawTargetLabel(cfg)
     return cfg.ShowWhenCameraOff ~= false
 end
 
+local function GetHighContrastColor()
+    if not Config.UI or not Config.UI.HighContrast or not Config.UI.HighContrast.Enabled then
+        return nil
+    end
+
+    local theme = Config.UI.HighContrast.Theme or "green"
+    
+    -- Handle Hex Colors (e.g. "#FF00FF")
+    if theme:sub(1,1) == "#" then
+        local r = tonumber(theme:sub(2,3), 16) or 255
+        local g = tonumber(theme:sub(4,5), 16) or 255
+        local b = tonumber(theme:sub(6,7), 16) or 255
+        return {r, g, b, 230}
+    end
+
+    local themes = {
+        ["green"]  = {0, 255, 0, 230},
+        ["black"]  = {0, 0, 0, 230},
+        ["orange"] = {255, 170, 0, 230},
+        ["red"]    = {255, 0, 0, 230},
+        ["purple"] = {191, 0, 255, 230},
+        ["blue"]   = {0, 136, 255, 230},
+        ["pink"]   = {255, 0, 255, 230},
+    }
+
+    return themes[theme:lower()] or themes["green"]
+end
+
 local function DrawWorldTargetLabel()
     local cfg = Config.UI and Config.UI.TargetLabel
     if not ShouldDrawTargetLabel(cfg) then return end
@@ -1444,7 +1472,14 @@ local function DrawWorldTargetLabel()
     SetTextFont(0)
     SetTextProportional(true)
     SetTextScale(scale, scale)
-    SetTextColour(0, 255, 0, 230)
+    local color = cfg.Color or {0, 255, 0, 230}
+    if cfg.FollowHighContrast then
+        local themeColor = GetHighContrastColor()
+        if themeColor then
+            color = themeColor
+        end
+    end
+    SetTextColour(color[1], color[2], color[3], color[4])
     SetTextDropshadow(0, 0, 0, 0, 255)
     SetTextEdge(1, 0, 0, 0, 255)
     SetTextDropShadow()
@@ -1807,6 +1842,10 @@ end
 
 function IsPersistentTrackingActive()
     return PersistentTracking.Active and PolCam.LockedTarget ~= nil
+end
+
+function IsHeliTrackingActive()
+    return HeliTrackingState.active == true
 end
 
 function OnCameraDeactivated_Tracking()

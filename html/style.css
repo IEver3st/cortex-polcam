@@ -13,6 +13,8 @@
     --hud-glow: rgba(255, 255, 255, 0.4);
     --hud-dim: rgba(200, 200, 200, 0.8);
     --hud-bg: rgba(0, 0, 0, 0.4);
+    --track-text-color: var(--hud-color);
+    --track-dim-color: var(--hud-dim);
     --danger-color: #ff4444;
     --warning-color: #ffaa00;
 
@@ -164,11 +166,12 @@ body {
     font-size: calc(var(--scale) * 1.3);
     font-weight: 900;
     letter-spacing: 1px;
+    color: var(--track-text-color);
 }
 
 .track-cue-distance {
     font-size: calc(var(--scale) * 1.1);
-    color: var(--hud-dim);
+    color: var(--track-dim-color);
 }
 
 /* Pilot HUD variant */
@@ -198,8 +201,8 @@ body {
 .pilot-track-cue.right .pilot-track-cue-arrow { border-left: 10px solid #fff; }
 
 .pilot-track-cue-text { display: flex; flex-direction: column; line-height: 1.1; }
-.pilot-track-cue-label { font-size: 12px; font-weight: 900; letter-spacing: 1px; }
-.pilot-track-cue-distance { font-size: 11px; opacity: 0.85; }
+.pilot-track-cue-label { font-size: 12px; font-weight: 900; letter-spacing: 1px; color: var(--track-text-color); }
+.pilot-track-cue-distance { font-size: 11px; opacity: 0.85; color: var(--track-dim-color); }
 
 #polcam-container.hidden {
     display: none !important;
