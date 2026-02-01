@@ -61,7 +61,7 @@ Config.UI = {
         Color = {0, 255, 0, 230}, -- over-riden if followhighcontrast is true
         FollowHighContrast = true,
     },
-    HighContrast = { Enabled = true, Theme = "blue" }, -- Options: green, black, orange, red, purple, blue, pink OR a Hex Code (e.g. "#FF00FF")
+    HighContrast = { Enabled = true, Theme = "green" }, -- Options: green, black, orange, red, purple, blue, pink OR a Hex Code (e.g. "#FF00FF")
 }
 
 -- VISION SETTINGS
