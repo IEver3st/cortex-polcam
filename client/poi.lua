@@ -37,6 +37,15 @@ local POIData = {
     MarkerCounter = 0
 }
 
+local function FindMarkerIndex(list, markerId)
+    for i, marker in ipairs(list) do
+        if marker.id == markerId then
+            return i
+        end
+    end
+    return nil
+end
+
 -- ============================================================================
 -- PLACE MARKER
 -- ============================================================================
@@ -203,6 +212,29 @@ AddEventHandler('polcam:syncPOI', function(marker)
     table.insert(POIData.AllMarkers, marker)
 end)
 
+RegisterNetEvent('polcam:receivePOI')
+AddEventHandler('polcam:receivePOI', function(marker)
+    if not marker or not marker.id or not marker.coords then return end
+    if marker.owner == GetPlayerServerId(PlayerId()) then return end
+
+    local existingIndex = FindMarkerIndex(POIData.AllMarkers, marker.id)
+    if existingIndex then
+        return
+    end
+
+    local blip = AddBlipForCoord(marker.coords.x, marker.coords.y, marker.coords.z)
+    SetBlipSprite(blip, 1)
+    SetBlipColour(blip, 4)
+    SetBlipScale(blip, 0.7)
+    SetBlipAsShortRange(blip, true)
+    BeginTextCommandSetBlipName("STRING")
+    AddTextComponentString("PolCam Marker (Shared)")
+    EndTextCommandSetBlipName(blip)
+
+    marker.blip = blip
+    table.insert(POIData.AllMarkers, marker)
+end)
+
 RegisterNetEvent('polcam:removeSyncedPOI')
 AddEventHandler('polcam:removeSyncedPOI', function(markerId)
     for i, marker in ipairs(POIData.AllMarkers) do
@@ -212,6 +244,45 @@ AddEventHandler('polcam:removeSyncedPOI', function(markerId)
             end
             table.remove(POIData.AllMarkers, i)
             break
+        end
+    end
+end)
+
+RegisterNetEvent('polcam:poiRemoved')
+AddEventHandler('polcam:poiRemoved', function(markerId)
+    local index = FindMarkerIndex(POIData.AllMarkers, markerId)
+    if not index then return end
+    local marker = POIData.AllMarkers[index]
+    if marker and marker.blip and DoesBlipExist(marker.blip) then
+        RemoveBlip(marker.blip)
+    end
+    table.remove(POIData.AllMarkers, index)
+end)
+
+RegisterNetEvent('polcam:syncAllPOIs')
+AddEventHandler('polcam:syncAllPOIs', function(serverMarkers)
+    for _, marker in ipairs(POIData.AllMarkers) do
+        if marker.blip and DoesBlipExist(marker.blip) then
+            RemoveBlip(marker.blip)
+        end
+    end
+    POIData.AllMarkers = {}
+
+    if type(serverMarkers) ~= "table" then return end
+
+    for _, marker in pairs(serverMarkers) do
+        if marker and marker.coords and marker.id and marker.owner ~= GetPlayerServerId(PlayerId()) then
+            local blip = AddBlipForCoord(marker.coords.x, marker.coords.y, marker.coords.z)
+            SetBlipSprite(blip, 1)
+            SetBlipColour(blip, 4)
+            SetBlipScale(blip, 0.7)
+            SetBlipAsShortRange(blip, true)
+            BeginTextCommandSetBlipName("STRING")
+            AddTextComponentString("PolCam Marker (Shared)")
+            EndTextCommandSetBlipName(blip)
+
+            marker.blip = blip
+            table.insert(POIData.AllMarkers, marker)
         end
     end
 end)

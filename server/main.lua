@@ -43,7 +43,7 @@ local SharedCameraState = {} -- vehicleNetId -> {heading, pitch, zoom, targetZoo
 -- NOTE: This is keyed by the camera "instance" (helicopter net id), not player.
 -- That way only one spotlight can exist per helicopter, and when one operator
 -- exits the camera another operator can take over the same instance.
-local ActiveSpotlights = {} -- vehicleNetId -> {active, radius, owner, heliCoords, groundCoords, targetNetId, trackingTarget}
+local ActiveSpotlights = {} -- vehicleNetId -> {active, radius, color, owner, heliCoords, groundCoords, targetNetId, trackingTarget}
 local HeliTracking = {} -- vehicleNetId -> {active, targetNetId, targetType, ownerSrc, seq}
 
 -- Rate limiting to prevent "Reliable network event overflow"
@@ -267,7 +267,7 @@ local function HandoffCamera(vehicleNetId, oldOwner)
         TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, spotlight)
 
         -- Ask new owner to ensure their local spotlight is enabled (without creating a new instance)
-        TriggerClientEvent('polcam:spotlightEnsureOn', nextOwner, spotlight.radius)
+        TriggerClientEvent('polcam:spotlightEnsureOn', nextOwner, spotlight.radius, spotlight.color)
     end
 end
 
@@ -381,7 +381,7 @@ end)
 -- Clear shared state when helicopter is abandoned (no occupants) or after timeout
 local function CleanupStaleStates()
     local now = GetGameTimer()
-    local staleThreshold = 300000 -- 5 minutes of no updates
+    local staleThreshold = (Config and Config.SharedCamera and Config.SharedCamera.StateTimeoutMs) or 300000
     
     for vehicleNetId, state in pairs(SharedCameraState) do
         if state.lastUpdate and (now - state.lastUpdate) > staleThreshold then
@@ -398,7 +398,7 @@ end
 -- SPOTLIGHT SYNC
 -- ============================================================================
 RegisterNetEvent('polcam:spotlightSync')
-AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCoords, initialHeliCoords)
+AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCoords, initialHeliCoords, color)
     local src = source
     local ped = GetPlayerPed(src)
     local vehicle = GetVehiclePedIsIn(ped, false)
@@ -425,6 +425,7 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
         ActiveSpotlights[vehicleNetId] = {
             active = true,
             radius = radius or 5.0,
+            color = color or (existingSpotlight and existingSpotlight.color) or nil,
             owner = src,
             vehicleNetId = vehicleNetId,
             heliCoords = initialHeliCoords or (existingSpotlight and existingSpotlight.heliCoords) or nil,
@@ -467,6 +468,21 @@ AddEventHandler('polcam:spotlightRadius', function(radius)
         LastSpotlightRadiusAt[vehicleNetId] = now
 
         spotlight.radius = radius
+        MaybeBroadcastSpotlight(vehicleNetId)
+    end
+end)
+
+RegisterNetEvent('polcam:spotlightColor')
+AddEventHandler('polcam:spotlightColor', function(color)
+    local src = source
+    local ped = GetPlayerPed(src)
+    local vehicle = GetVehiclePedIsIn(ped, false)
+    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    if not vehicleNetId then return end
+
+    local spotlight = ActiveSpotlights[vehicleNetId]
+    if spotlight and spotlight.owner == src then
+        spotlight.color = color
         MaybeBroadcastSpotlight(vehicleNetId)
     end
 end)
@@ -542,15 +558,19 @@ end
 -- Broadcast tracking state to ALL players in the same helicopter
 local function BroadcastHeliTracking(vehicleNetId)
     if not vehicleNetId then 
-        print("[PolCam Server DEBUG] BroadcastHeliTracking: vehicleNetId is nil, aborting")
+        if Config and Config.Debug and Config.Debug.Enabled then
+            print("[PolCam Server DEBUG] BroadcastHeliTracking: vehicleNetId is nil, aborting")
+        end
         return 
     end
     
     local state = HeliTracking[vehicleNetId] or { active = false, seq = 0 }
     state.vehicleNetId = vehicleNetId
     
-    print("[PolCam Server DEBUG] BroadcastHeliTracking - vehicleNetId: " .. tostring(vehicleNetId))
-    print("[PolCam Server DEBUG] State to broadcast - active: " .. tostring(state.active) .. ", seq: " .. tostring(state.seq))
+    if Config and Config.Debug and Config.Debug.Enabled then
+        print("[PolCam Server DEBUG] BroadcastHeliTracking - vehicleNetId: " .. tostring(vehicleNetId))
+        print("[PolCam Server DEBUG] State to broadcast - active: " .. tostring(state.active) .. ", seq: " .. tostring(state.seq))
+    end
     
     local players = GetPlayers()
     local sentCount = 0
@@ -562,19 +582,25 @@ local function BroadcastHeliTracking(vehicleNetId)
                 local playerVeh = GetVehiclePedIsIn(ped, false)
                 if playerVeh and playerVeh ~= 0 then
                     local playerVehNetId = (DoesEntityExist(playerVeh) and NetworkGetNetworkIdFromEntity(playerVeh) or nil)
-                    print("[PolCam Server DEBUG] Checking player " .. tostring(playerSrc) .. " - playerVehNetId: " .. tostring(playerVehNetId))
+                    if Config and Config.Debug and Config.Debug.Enabled then
+                        print("[PolCam Server DEBUG] Checking player " .. tostring(playerSrc) .. " - playerVehNetId: " .. tostring(playerVehNetId))
+                    end
                     if playerVehNetId == vehicleNetId then
                         -- This player is in the same helicopter, send them the tracking state
                         TriggerClientEvent('polcam:heliTrackingState', playerSrc, vehicleNetId, state)
                         sentCount = sentCount + 1
-                        print("[PolCam Server DEBUG] Sent heliTrackingState to player " .. tostring(playerSrc))
+                        if Config and Config.Debug and Config.Debug.Enabled then
+                            print("[PolCam Server DEBUG] Sent heliTrackingState to player " .. tostring(playerSrc))
+                        end
                     end
                 end
             end
         end
     end
     
-    print("[PolCam Server DEBUG] BroadcastHeliTracking complete - sent to " .. tostring(sentCount) .. " players")
+    if Config and Config.Debug and Config.Debug.Enabled then
+        print("[PolCam Server DEBUG] BroadcastHeliTracking complete - sent to " .. tostring(sentCount) .. " players")
+    end
 end
 
 local function ClearHeliTracking(vehicleNetId)
@@ -591,12 +617,18 @@ local function ClearHeliTracking(vehicleNetId)
         seq = newSeq
     }
 
+    local tracking = HeliTracking[vehicleNetId]
+
     if ActiveSpotlights[vehicleNetId] then
         ActiveSpotlights[vehicleNetId].targetNetId = nil
         ActiveSpotlights[vehicleNetId].trackingTarget = false
     end
 
     BroadcastHeliTracking(vehicleNetId)
+
+    if tracking and not tracking.active and not IsVehicleOccupiedByAnyPlayer(vehicleNetId) then
+        HeliTracking[vehicleNetId] = nil
+    end
 end
 
 local function IsAllowedHelicopterEntity(vehicle)
@@ -1000,6 +1032,10 @@ CreateThread(function()
             if tracking and tracking.active then
                 if not IsVehicleOccupiedByAnyPlayer(vehicleNetId) then
                     ClearHeliTracking(vehicleNetId)
+                    HeliTracking[vehicleNetId] = nil
+                end
+            elseif tracking and not tracking.active then
+                if not IsVehicleOccupiedByAnyPlayer(vehicleNetId) then
                     HeliTracking[vehicleNetId] = nil
                 end
             end

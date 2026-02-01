@@ -62,7 +62,8 @@ local SpotlightData = {
     Falloff = 15.0,             -- Edge softness (higher = softer edges, 0 = hard cutoff)
     Color = {255, 255, 255},
     SyncWithCamera = true,
-    MaxPersistentDistance = 500.0  -- Max distance before spotlight auto-disables
+    MaxPersistentDistance = 500.0,  -- Max distance before spotlight auto-disables
+    ThemeIndex = 1
 }
 
 -- Apply config overrides
@@ -74,6 +75,18 @@ if Config and Config.Spotlight then
     SpotlightData.Hardness = Config.Spotlight.Hardness or SpotlightData.Hardness
     SpotlightData.Falloff = Config.Spotlight.Falloff or SpotlightData.Falloff
     SpotlightData.Color = Config.Spotlight.Color or SpotlightData.Color
+    
+    if Config.Spotlight.Themes then
+        -- Find current theme index if color matches
+        for i, theme in ipairs(Config.Spotlight.Themes) do
+            if theme.color[1] == SpotlightData.Color[1] and 
+               theme.color[2] == SpotlightData.Color[2] and 
+               theme.color[3] == SpotlightData.Color[3] then
+                SpotlightData.ThemeIndex = i
+                break
+            end
+        end
+    end
 end
 
 local _lastSpotlightPosSentAt = 0
@@ -179,7 +192,7 @@ function ActivateSpotlight()
     local initialHeliCoords = heli and DoesEntityExist(heli) and GetEntityCoords(heli) or nil
     
     -- Sync to server with initial position data
-    TriggerServerEvent('polcam:spotlightSync', true, SpotlightData.Radius, initialGroundCoords, initialHeliCoords)
+    TriggerServerEvent('polcam:spotlightSync', true, SpotlightData.Radius, initialGroundCoords, initialHeliCoords, SpotlightData.Color)
     
     -- Reset position sync timer to ensure immediate updates flow through
     _lastSpotlightPosSentAt = 0
@@ -316,10 +329,7 @@ end
 -- RENDER SPOTLIGHT LOOP (Handles both active camera and persistent mode)
 -- ============================================================================
 function RenderSpotlightLoop()
-    -- Cache spotlight config values once
-    local colorR = SpotlightData.Color[1]
-    local colorG = SpotlightData.Color[2]
-    local colorB = SpotlightData.Color[3]
+    -- Cache spotlight config values
     local range = SpotlightData.Range
     local brightness = SpotlightData.Brightness
     local hardness = SpotlightData.Hardness
@@ -327,6 +337,10 @@ function RenderSpotlightLoop()
     local maxPersistentDist = SpotlightData.MaxPersistentDistance
     
     while SpotlightData.Active or SpotlightData.PersistentActive do
+        local colorR = SpotlightData.Color[1]
+        local colorG = SpotlightData.Color[2]
+        local colorB = SpotlightData.Color[3]
+        
         local heli = PolCam.CurrentVehicle
         
         -- Check if we need to stop due to distance or lost target
@@ -420,13 +434,11 @@ function RenderSpotlightLoop()
             local speed = smoothingSpeed or 10.0
             local alpha = 1.0 - math_exp(-speed * dt)
             if not _smoothedDir then
-                _smoothedDir = vector3(dirX, dirY, dirZ)
+                _smoothedDir = {x = dirX, y = dirY, z = dirZ}
             else
-                _smoothedDir = vector3(
-                    _smoothedDir.x + (dirX - _smoothedDir.x) * alpha,
-                    _smoothedDir.y + (dirY - _smoothedDir.y) * alpha,
-                    _smoothedDir.z + (dirZ - _smoothedDir.z) * alpha
-                )
+                _smoothedDir.x = _smoothedDir.x + (dirX - _smoothedDir.x) * alpha
+                _smoothedDir.y = _smoothedDir.y + (dirY - _smoothedDir.y) * alpha
+                _smoothedDir.z = _smoothedDir.z + (dirZ - _smoothedDir.z) * alpha
             end
 
             -- Draw spotlight
@@ -471,6 +483,30 @@ local function NormalizeVec3(v)
     return vector3(v.x / len, v.y / len, v.z / len)
 end
 
+function CycleSpotlightColor()
+    if not SpotlightData.Active then return end
+    if not Config.Spotlight.Themes then return end
+
+    local themeCount = #Config.Spotlight.Themes
+    if themeCount <= 1 then return end
+
+    SpotlightData.ThemeIndex = SpotlightData.ThemeIndex + 1
+    if SpotlightData.ThemeIndex > themeCount then
+        SpotlightData.ThemeIndex = 1
+    end
+
+    local theme = Config.Spotlight.Themes[SpotlightData.ThemeIndex]
+    SpotlightData.Color = theme.color
+
+    -- Notify
+    if PolCamNotify then
+        PolCamNotify('inform', 'Spotlight Theme: ' .. theme.name)
+    end
+
+    -- Sync to server
+    TriggerServerEvent('polcam:spotlightColor', SpotlightData.Color)
+end
+
 CreateThread(function()
     local colorR = SpotlightData.Color[1]
     local colorG = SpotlightData.Color[2]
@@ -503,6 +539,12 @@ CreateThread(function()
                 local vehicle = NetworkGetEntityFromNetworkId(vehicleNetId)
                 
                 if vehicle and vehicle ~= 0 and DoesEntityExist(vehicle) then
+                    -- Use color from synced data or fall back to default
+                    local r, g, b = colorR, colorG, colorB
+                    if data.color then
+                        r, g, b = data.color[1], data.color[2], data.color[3]
+                    end
+
                     -- Use REAL helicopter position (not synced) for smooth origin
                     local realHeliCoords = GetEntityCoords(vehicle)
                     local spotlightOrigin = vector3(realHeliCoords.x, realHeliCoords.y, realHeliCoords.z - 2.0)
@@ -533,21 +575,36 @@ CreateThread(function()
                     local _, _, smoothingSpeed = GetNetSyncConfig()
                     local interpSpeed = (smoothingSpeed or 10.0) * 0.8  -- Slightly slower for remote to hide latency
                     local alpha = 1.0 - math_exp(-interpSpeed * dt)
-                    
-                    interp.currentGround = LerpVec3(interp.currentGround, interp.targetGround, alpha)
-                    
+
+                    -- Lerp in-place to avoid vector3 allocation per frame
+                    local cg = interp.currentGround
+                    local tg = interp.targetGround
+                    local cgx = cg.x + (tg.x - cg.x) * alpha
+                    local cgy = cg.y + (tg.y - cg.y) * alpha
+                    local cgz = cg.z + (tg.z - cg.z) * alpha
+                    interp.currentGround = vector3(cgx, cgy, cgz)
+
                     -- Calculate direction from real helicopter position to interpolated ground
-                    local dx = interp.currentGround.x - spotlightOrigin.x
-                    local dy = interp.currentGround.y - spotlightOrigin.y
-                    local dz = interp.currentGround.z - spotlightOrigin.z
-                    local targetDir = NormalizeVec3(vector3(dx, dy, dz))
-                    
+                    local dx = cgx - spotlightOrigin.x
+                    local dy = cgy - spotlightOrigin.y
+                    local dz = cgz - spotlightOrigin.z
+                    local len = math_sqrt(dx * dx + dy * dy + dz * dz)
+                    if len < 0.0001 then len = 1 end
+                    local invLen = 1.0 / len
+                    local tdx, tdy, tdz = dx * invLen, dy * invLen, dz * invLen
+
                     -- Smooth the direction as well for extra smoothness
                     if not interp.currentDir then
-                        interp.currentDir = targetDir
+                        interp.currentDir = vector3(tdx, tdy, tdz)
                     else
-                        interp.currentDir = LerpVec3(interp.currentDir, targetDir, alpha)
-                        interp.currentDir = NormalizeVec3(interp.currentDir)
+                        local cd = interp.currentDir
+                        local sx = cd.x + (tdx - cd.x) * alpha
+                        local sy = cd.y + (tdy - cd.y) * alpha
+                        local sz = cd.z + (tdz - cd.z) * alpha
+                        local slen = math_sqrt(sx * sx + sy * sy + sz * sz)
+                        if slen < 0.0001 then slen = 1 end
+                        local sinv = 1.0 / slen
+                        interp.currentDir = vector3(sx * sinv, sy * sinv, sz * sinv)
                     end
                     
                     local radius = data.radius or 5.0
@@ -556,7 +613,7 @@ CreateThread(function()
                     DrawSpotLight(
                         spotlightOrigin.x, spotlightOrigin.y, spotlightOrigin.z,
                         interp.currentDir.x, interp.currentDir.y, interp.currentDir.z,
-                        colorR, colorG, colorB,
+                        r, g, b,
                         range,
                         brightness,
                         hardness,
@@ -610,11 +667,14 @@ end)
 
 -- Force-enable spotlight locally when server hands off the camera.
 RegisterNetEvent('polcam:spotlightEnsureOn')
-AddEventHandler('polcam:spotlightEnsureOn', function(radius)
+AddEventHandler('polcam:spotlightEnsureOn', function(radius, color)
     if not PolCam or not PolCam.Active then return end
     if not SpotlightData then return end
 
     SpotlightData.Radius = radius or SpotlightData.Radius
+    if color then
+        SpotlightData.Color = color
+    end
 
     -- If already on or persistent, nothing to do.
     if SpotlightData.Active or SpotlightData.PersistentActive then return end

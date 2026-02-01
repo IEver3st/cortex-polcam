@@ -47,6 +47,46 @@
     --hud-bg: rgba(255, 255, 255, 0.3);
 }
 
+/* High Contrast - Orange Theme */
+.highcontrast-orange {
+    --hud-color: #ffaa00;
+    --hud-glow: rgba(255, 170, 0, 0.6);
+    --hud-dim: rgba(200, 130, 0, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
+/* High Contrast - Red Theme */
+.highcontrast-red {
+    --hud-color: #ff0000;
+    --hud-glow: rgba(255, 0, 0, 0.6);
+    --hud-dim: rgba(200, 0, 0, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
+/* High Contrast - Purple Theme */
+.highcontrast-purple {
+    --hud-color: #bf00ff;
+    --hud-glow: rgba(191, 0, 255, 0.6);
+    --hud-dim: rgba(150, 0, 200, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
+/* High Contrast - Blue Theme */
+.highcontrast-blue {
+    --hud-color: #0088ff;
+    --hud-glow: rgba(0, 136, 255, 0.6);
+    --hud-dim: rgba(0, 100, 200, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
+/* High Contrast - Pink Theme */
+.highcontrast-pink {
+    --hud-color: #ff00ff;
+    --hud-glow: rgba(255, 0, 255, 0.6);
+    --hud-dim: rgba(200, 0, 200, 0.9);
+    --hud-bg: rgba(0, 0, 0, 0.7);
+}
+
 
 /* --------------------------------------------------------------------------
    Base Styles

@@ -24,7 +24,6 @@ local GetMakeNameFromVehicleModel = GetMakeNameFromVehicleModel
 local GetLabelText = GetLabelText
 local GetVehicleClass = GetVehicleClass
 local GetModelDimensions = GetModelDimensions
-local GetOffsetFromEntityInWorldCoords = GetOffsetFromEntityInWorldCoords
 local GetCamMatrix = GetCamMatrix
 local DoesCamExist = DoesCamExist
 local GetEntityAttachedTo = GetEntityAttachedTo
@@ -116,8 +115,7 @@ end
 -- Tracking State
 local Tracking = {
     lastScanTime = 0,
-    scanIntervalMs = 50,
-    hasLOS = true,
+    scanIntervalMs = 75,
     lockStartTime = 0,
     cameraActivatedTime = 0,
     candidateEntity = nil,
@@ -125,6 +123,8 @@ local Tracking = {
     labelSmoothedDistance = nil,
     labelLastUpdateTime = 0,
     labelTargetEntity = nil,
+    occludedSince = nil,
+    lastOcclusionCheck = 0,
     debug = {
         camPos = nil,
         camDir = nil,
@@ -143,14 +143,16 @@ local Tracking = {
         candidateNetId = nil,
         candidateType = nil,
         heliPos = nil,
-        losTargetPoint = nil,
-        losResult = nil,
-        losStats = nil,
-        occlusion = nil,
         shared = nil,
         detectionScore = nil,
         zoom = 0,
-        fov = 0
+        fov = 0,
+        occluded = false,
+        occlusionAgeMs = 0,
+        occlusionHitType = "none",
+        occlusionHitModel = nil,
+        occlusionHitPos = nil,
+        occlusionHitEntity = nil
     }
 }
 
@@ -178,7 +180,9 @@ local HeliTrackingState = {
 
 local lastLockedTargetNetId = nil
 local lastCandidateNetId = nil
-local lastReacquireUiState = nil
+local lastCandidateEntity = nil
+local lastCandidateType = nil
+local lastCandidateTime = 0
 
 local SyncedTracking = HeliTrackingState
 
@@ -188,12 +192,10 @@ local MakeNameCache = {}
 local LastUpdateLockedTime = 0
 local UPDATE_LOCKED_INTERVAL = 100
 local LastPoolScanTime = 0
-local POOL_SCAN_INTERVAL = 500
+local POOL_SCAN_INTERVAL = 200
 local cachedPlateThreshold = nil
 local lastScanSignature = nil
 local lastScanLogTime = 0
-local lastLosLogHasLOS = nil
-local lastLosLogOccType = nil
 local lastSharedLogSeq = nil
 local lastSharedLogTarget = nil
 local lastSharedLogActive = nil
@@ -228,23 +230,6 @@ local function GetCameraDirection()
     end
     local _, forwardVector, _, _ = GetCamMatrix(PolCam.Camera)
     return forwardVector
-end
-
-local function GetOcclusionOrigin()
-    local camPos = GetCameraPosition()
-    if camPos then
-        return camPos
-    end
-
-    if PolCam.CurrentVehicle and DoesEntityExist(PolCam.CurrentVehicle) then
-        local coords = GetEntityCoords(PolCam.CurrentVehicle)
-        local minDim, maxDim = GetModelDimensions(GetEntityModel(PolCam.CurrentVehicle))
-        local height = maxDim.z - minDim.z
-        local zOffset = math_max(0.5, height * 0.5)
-        return coords + vector3(0.0, 0.0, zOffset)
-    end
-
-    return nil
 end
 
 local function Normalize(v)
@@ -448,34 +433,6 @@ local function RenderDebugVisuals()
         local col = Config.Debug.TargetBoxColor or {255, 128, 0, 200}
         DrawDebugBox(Tracking.candidateEntity, col[1], col[2], col[3], col[4])
     end
-    
-    if Config.Debug.ShowLOSRay and PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
-        local heliPos = GetHelicopterPosition()
-        local targetPoint = GetEntityTargetPoint(PolCam.LockedTarget)
-        
-        if heliPos and targetPoint then
-            local col
-            if Tracking.hasLOS then
-                col = Config.Debug.LOSColor or {0, 255, 0, 200}
-            else
-                col = Config.Debug.LOSBlockedColor or {255, 0, 0, 200}
-            end
-            DrawDebugLine(heliPos, targetPoint, col[1], col[2], col[3], col[4])
-            DrawDebugSphere(heliPos, 1.0, col[1], col[2], col[3], 150)
-        end
-    end
-
-    if Config.Debug.ShowOcclusionDetails and Tracking.debug.losResult and Tracking.debug.losResult.samples then
-        local samples = Tracking.debug.losResult.samples
-        for i = 1, #samples do
-            local sample = samples[i]
-            local point = sample and sample.point
-            if point then
-                local col = sample.clear and {0, 255, 0, 160} or {255, 0, 0, 160}
-                DrawDebugSphere(point, 0.3, col[1], col[2], col[3], col[4])
-            end
-        end
-    end
 end
 
 local DEBUG_PANEL_INTERVAL_MS = 200
@@ -485,15 +442,6 @@ local debugPanelShown = false
 local function formatVec3(v)
     if not v then return nil end
     return string_format('%.1f %.1f %.1f', v.x, v.y, v.z)
-end
-
-local function formatHeights(heights)
-    if type(heights) ~= 'table' or #heights == 0 then return 'none' end
-    local out = {}
-    for i = 1, #heights do
-        out[#out + 1] = string_format('%.2f', heights[i])
-    end
-    return table_concat(out, ',')
 end
 
 local function buildDebugPanelLines()
@@ -522,6 +470,12 @@ local function buildDebugPanelLines()
     if cfg.ShowScanDetails then
         lines[#lines + 1] = { label = 'ProbeHit', value = dbg.probeHit or false }
         lines[#lines + 1] = { label = 'ScanSource', value = dbg.scanSource or 'none' }
+        lines[#lines + 1] = { label = 'Occluded', value = dbg.occluded or false }
+        lines[#lines + 1] = { label = 'OccAgeMs', value = tostring(dbg.occlusionAgeMs or 0) }
+        lines[#lines + 1] = { label = 'OccHit', value = dbg.occlusionHitType or 'none' }
+        if dbg.occlusionHitModel then
+            lines[#lines + 1] = { label = 'OccModel', value = tostring(dbg.occlusionHitModel) }
+        end
         lines[#lines + 1] = { label = 'DetScore', value = string_format('%.3f', dbg.detectionScore or 0) }
         lines[#lines + 1] = { label = 'Zoom', value = string_format('%.2f', dbg.zoom or 0) }
         lines[#lines + 1] = { label = 'FOV', value = string_format('%.2f', dbg.fov or 0) }
@@ -551,24 +505,6 @@ local function buildDebugPanelLines()
         lines[#lines + 1] = { label = 'HitType', value = dbg.hitEntityType or 'none' }
         lines[#lines + 1] = { label = 'CandidateNet', value = tostring(dbg.candidateNetId) }
         lines[#lines + 1] = { label = 'LockedNet', value = tostring(lockedNet) }
-    end
-
-    if cfg.ShowLOSStatus then
-        lines[#lines + 1] = { label = 'LOS', value = Tracking.hasLOS and 'OK' or 'BLOCKED', color = Tracking.hasLOS and '#10b981' or '#ff4444' }
-    end
-
-    if cfg.ShowOcclusionDetails then
-        local occ = dbg.occlusion or {}
-        lines[#lines + 1] = { label = 'OccType', value = tostring(occ.occlusionType or 'none') }
-        lines[#lines + 1] = { label = 'OccMs', value = string_format('%.0f', occ.occludedMs or 0) }
-        lines[#lines + 1] = { label = 'OccMax', value = string_format('%.0f', occ.maxOccludedMs or 0) }
-        lines[#lines + 1] = { label = 'OccExtra', value = string_format('%.0f', occ.extraGraceMs or 0) }
-        lines[#lines + 1] = { label = 'CrosshairOK', value = occ.crosshairOk or false }
-        lines[#lines + 1] = { label = 'Reacquiring', value = occ.reacquiring or false }
-        local stats = dbg.losStats or {}
-        lines[#lines + 1] = { label = 'RayRadius', value = string_format('%.2f', stats.rayRadius or 0) }
-        lines[#lines + 1] = { label = 'Samples', value = string_format('%d/%d', stats.clearCount or 0, stats.sampleCount or 0) }
-        lines[#lines + 1] = { label = 'Heights', value = formatHeights(stats.sampleHeights) }
     end
 
     if cfg.ShowSharedState then
@@ -633,6 +569,10 @@ local function buildDebugPanelData()
         probeHit = Tracking.debug.probeHit,
         hitEntity = Tracking.debug.hitEntity,
         hitEntityType = Tracking.debug.hitEntityType,
+        occluded = Tracking.debug.occluded,
+        occlusionAgeMs = Tracking.debug.occlusionAgeMs,
+        occlusionHitType = Tracking.debug.occlusionHitType,
+        occlusionHitModel = Tracking.debug.occlusionHitModel,
         candidateNetId = Tracking.debug.candidateNetId,
         detectionScore = Tracking.debug.detectionScore,
         candidateType = Tracking.candidateType,
@@ -644,9 +584,6 @@ local function buildDebugPanelData()
 
     return {
         scan = scan,
-        los = Tracking.debug.losResult,
-        losStats = Tracking.debug.losStats,
-        occlusion = Tracking.debug.occlusion,
         shared = shared,
         camera = camera
     }
@@ -717,320 +654,6 @@ function RenderTargetingDebug()
     updateEsLibDebugPanel(false)
 end
 
--- Line of Sight / Occlusion Checking
-local OCCLUSION_DEFAULT_SAMPLE_HEIGHTS = { 0.55, 0.9 }
-local OCCLUSION_RAY_FLAGS = 1 + 2 + 4 + 8 + 16
-local OCCLUSION_RAY_P9 = 7
-
-local OcclusionState = {
-    lastCheckTime = 0,
-    occludedSince = 0,
-    occlusionType = nil,
-    reacquiring = false,
-    reacquireStartTime = 0
-}
-
-local OCCLUSION_TYPE_NONE = "none"
-local OCCLUSION_TYPE_TERRAIN = "terrain"
-local OCCLUSION_TYPE_BUILDING = "building"
-local OCCLUSION_TYPE_VEGETATION = "vegetation"
-
-local GetShapeTestResultIncludingMaterial = GetShapeTestResultIncludingMaterial
-
-local TERRAIN_MATERIAL_HASHES = {
-    [1109728704] = true,
-    [-1286696947] = true,
-    [-1885547121] = true,
-    [-461750719] = true,
-    [-1942898710] = true,
-    [-700658213] = true,
-    [510490462] = true,
-    [1635937914] = true,
-    [-1286696947] = true,
-    [581794674] = true,
-    [-1595148316] = true,
-    [-1833527165] = true,
-    [-1942898710] = true,
-    [223086562] = true,
-    [1109728704] = true,
-}
-
-local VEGETATION_MATERIAL_HASHES = {
-    [-461750719] = true,
-    [1064636955] = true,
-    [-1885547121] = true,
-    [581794674] = true,
-}
-
-local function ClassifyHitMaterial(materialHash, hitEntity, hitCoords, origin)
-    if hitEntity and hitEntity ~= 0 then
-        local exists = false
-        local success = pcall(function()
-            exists = DoesEntityExist(hitEntity)
-        end)
-        
-        if success and exists then
-            -- Ignore our own helicopter entirely
-            if PolCam.CurrentVehicle and hitEntity == PolCam.CurrentVehicle then
-                return OCCLUSION_TYPE_VEGETATION -- Treat as ignorable
-            end
-
-            if PolCam.CurrentVehicle and GetEntityAttachedTo then
-                local attachedTo = GetEntityAttachedTo(hitEntity)
-                if attachedTo and attachedTo ~= 0 and attachedTo == PolCam.CurrentVehicle then
-                    return OCCLUSION_TYPE_VEGETATION
-                end
-            end
-            
-            if IsEntityAVehicle(hitEntity) then
-                return OCCLUSION_TYPE_VEGETATION
-            end
-            
-            if IsEntityAPed(hitEntity) then
-                return OCCLUSION_TYPE_VEGETATION
-            end
-        end
-    end
-    
-    if VEGETATION_MATERIAL_HASHES[materialHash] then
-        return OCCLUSION_TYPE_VEGETATION
-    end
-    
-    if TERRAIN_MATERIAL_HASHES[materialHash] then
-        if hitCoords and origin then
-            local heightDiff = origin.z - hitCoords.z
-            if heightDiff > 5.0 then
-                return OCCLUSION_TYPE_TERRAIN
-            end
-        end
-        return OCCLUSION_TYPE_TERRAIN
-    end
-    
-    return OCCLUSION_TYPE_BUILDING
-end
-
-local function GetOcclusionConfig()
-    local trackingCfg = Config and Config.Tracking
-    local occ = trackingCfg and trackingCfg.Occlusion
-
-    local defaults = {
-        Enabled = true,
-        CheckIntervalMs = 150,
-        MaxOccludedMs = 2000,
-        AcquireGraceMs = 0,
-        RayRadius = 0.35,
-        SampleHeights = OCCLUSION_DEFAULT_SAMPLE_HEIGHTS,
-        CrosshairGraceMs = 0,
-        CrosshairMaxAngleDeg = 0,
-        TerrainAware = true,
-        TerrainMaxOccludedMs = 0,
-        BuildingMaxOccludedMs = 2500,
-        VegetationIgnored = true
-    }
-
-    if not occ then
-        return defaults
-    end
-
-    return {
-        Enabled = occ.Enabled ~= false,
-        CheckIntervalMs = occ.CheckIntervalMs or defaults.CheckIntervalMs,
-        MaxOccludedMs = occ.MaxOccludedMs or defaults.MaxOccludedMs,
-        AcquireGraceMs = occ.AcquireGraceMs or defaults.AcquireGraceMs,
-        RayRadius = occ.RayRadius or defaults.RayRadius,
-        SampleHeights = occ.SampleHeights or defaults.SampleHeights,
-        CrosshairGraceMs = occ.CrosshairGraceMs or defaults.CrosshairGraceMs,
-        CrosshairMaxAngleDeg = occ.CrosshairMaxAngleDeg or defaults.CrosshairMaxAngleDeg,
-        TerrainAware = occ.TerrainAware ~= false,
-        TerrainMaxOccludedMs = occ.TerrainMaxOccludedMs or defaults.TerrainMaxOccludedMs,
-        BuildingMaxOccludedMs = occ.BuildingMaxOccludedMs or defaults.BuildingMaxOccludedMs,
-        VegetationIgnored = occ.VegetationIgnored ~= false
-    }
-end
-
-local function ResetOcclusionState()
-    OcclusionState.lastCheckTime = 0
-    OcclusionState.occludedSince = 0
-    OcclusionState.occlusionType = nil
-    OcclusionState.reacquiring = false
-    OcclusionState.reacquireStartTime = 0
-    Tracking.hasLOS = true
-    Tracking.debug.losResult = nil
-    Tracking.debug.losTargetPoint = nil
-    Tracking.debug.losStats = nil
-    Tracking.debug.occlusion = nil
-end
-
-local function NormalizeSampleHeights(sampleHeights)
-    if type(sampleHeights) ~= "table" or #sampleHeights == 0 then
-        return OCCLUSION_DEFAULT_SAMPLE_HEIGHTS
-    end
-
-    local normalized = {}
-    for i = 1, #sampleHeights do
-        local value = tonumber(sampleHeights[i])
-        if value then
-            normalized[#normalized + 1] = value
-        end
-    end
-
-    if #normalized == 0 then
-        return OCCLUSION_DEFAULT_SAMPLE_HEIGHTS
-    end
-
-    return normalized
-end
-
-local function BuildOcclusionSamplePoints(entity, sampleHeights)
-    if not entity or entity == 0 or not DoesEntityExist(entity) then
-        return {}, nil
-    end
-
-    local heights = NormalizeSampleHeights(sampleHeights)
-    local model = GetEntityModel(entity)
-    local minDim, maxDim = GetModelDimensions(model)
-    local height = maxDim.z - minDim.z
-
-    if height <= 0.01 then
-        local coords = GetEntityCoords(entity)
-        return { coords }, coords
-    end
-
-    local points = {}
-    for i = 1, #heights do
-        local ratio = math_clamp(heights[i], 0.0, 1.0)
-        local zOffset = minDim.z + height * ratio
-        points[#points + 1] = GetOffsetFromEntityInWorldCoords(entity, 0.0, 0.0, zOffset)
-    end
-
-    local primaryPoint = points[1] or GetEntityTargetPoint(entity) or GetEntityCoords(entity)
-    return points, primaryPoint
-end
-
-local function RaycastOcclusion(origin, targetPoint, radius, target, targetVehicle, settings)
-    local handle = StartShapeTestCapsule(
-        origin.x, origin.y, origin.z,
-        targetPoint.x, targetPoint.y, targetPoint.z,
-        radius,
-        OCCLUSION_RAY_FLAGS,
-        PolCam.CurrentVehicle,
-        OCCLUSION_RAY_P9
-    )
-
-    local _, hit, hitCoords, surfaceNormal, materialHash, hitEntity = GetShapeTestResultIncludingMaterial(handle)
-
-    if not hit then
-        return true, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = OCCLUSION_TYPE_NONE }
-    end
-
-    if hitEntity == nil or hitEntity == 0 then
-        local occType = ClassifyHitMaterial(materialHash, nil, hitCoords, origin)
-        
-        if settings and settings.VegetationIgnored and occType == OCCLUSION_TYPE_VEGETATION then
-            return true, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = OCCLUSION_TYPE_VEGETATION, ignored = true }
-        end
-        
-        return false, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = occType, materialHash = materialHash }
-    end
-
-    -- Treat hits on target, target's vehicle, or our own helicopter as clear LOS
-    local clear = (hitEntity == target) 
-        or (targetVehicle ~= nil and hitEntity == targetVehicle)
-        or (PolCam.CurrentVehicle ~= nil and hitEntity == PolCam.CurrentVehicle)
-    
-    if clear then
-        return true, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = OCCLUSION_TYPE_NONE }
-    end
-    
-    local occType = ClassifyHitMaterial(materialHash, hitEntity, hitCoords, origin)
-    
-    if settings and settings.VegetationIgnored and occType == OCCLUSION_TYPE_VEGETATION then
-        return true, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = OCCLUSION_TYPE_VEGETATION, ignored = true }
-    end
-    
-    return false, { hit = hit, hitEntity = hitEntity, hitCoords = hitCoords, occlusionType = occType, materialHash = materialHash }
-end
-
-local function HasCameraLineOfSight(target, settings)
-    if not target or not DoesEntityExist(target) then return true, nil, OCCLUSION_TYPE_NONE end
-
-    local origin = GetOcclusionOrigin()
-    if not origin then return true, nil, OCCLUSION_TYPE_NONE end
-
-    local targetVehicle = nil
-    if IsEntityAPed(target) and IsPedInAnyVehicle(target, false) then
-        targetVehicle = GetVehiclePedIsIn(target, false)
-    end
-
-    local normalizedHeights = NormalizeSampleHeights(settings.SampleHeights)
-    local samplePoints, primaryPoint = BuildOcclusionSamplePoints(target, normalizedHeights)
-    if #samplePoints == 0 then
-        primaryPoint = GetEntityTargetPoint(target) or GetEntityCoords(target)
-        samplePoints = { primaryPoint }
-    end
-
-    Tracking.debug.losTargetPoint = primaryPoint
-
-    local samples = {}
-    local hasLOS = false
-    local clearCount = 0
-    local blockedCount = 0
-    local worstOcclusionType = OCCLUSION_TYPE_NONE
-    local occlusionPriority = { [OCCLUSION_TYPE_NONE] = 0, [OCCLUSION_TYPE_VEGETATION] = 1, [OCCLUSION_TYPE_BUILDING] = 2, [OCCLUSION_TYPE_TERRAIN] = 3 }
-
-    for i = 1, #samplePoints do
-        local point = samplePoints[i]
-        local clear, rayInfo = RaycastOcclusion(origin, point, settings.RayRadius, target, targetVehicle, settings)
-        samples[#samples + 1] = {
-            point = point,
-            ray = rayInfo,
-            clear = clear
-        }
-        if clear then
-            hasLOS = true
-            clearCount = clearCount + 1
-        else
-            blockedCount = blockedCount + 1
-            local occType = rayInfo.occlusionType or OCCLUSION_TYPE_BUILDING
-            if occlusionPriority[occType] > occlusionPriority[worstOcclusionType] then
-                worstOcclusionType = occType
-            end
-        end
-    end
-
-    Tracking.debug.losStats = {
-        sampleCount = #samplePoints,
-        clearCount = clearCount,
-        blockedCount = blockedCount,
-        rayRadius = settings.RayRadius,
-        sampleHeights = normalizedHeights
-    }
-
-    Tracking.debug.losResult = {
-        origin = origin,
-        targetVehicle = targetVehicle,
-        samples = samples,
-        hasLOS = hasLOS,
-        occlusionType = worstOcclusionType
-    }
-
-    return hasLOS, primaryPoint, worstOcclusionType
-end
-
-local function IsTargetWithinCrosshair(targetPoint, maxAngleDeg)
-    if not targetPoint or maxAngleDeg <= 0 then return false end
-
-    local camPos = GetCameraPosition()
-    local camDir = GetCameraDirection()
-    if not camPos or not camDir then return false end
-
-    local toTarget = Normalize(targetPoint - camPos)
-    local dot = (camDir.x * toTarget.x) + (camDir.y * toTarget.y) + (camDir.z * toTarget.z)
-    local clamped = math_clamp(dot, -1.0, 1.0)
-    local angleDeg = math_deg(math_acos(clamped))
-    return angleDeg <= maxAngleDeg
-end
-
 local function IsHeliEntity(entity)
     if not entity or entity == 0 then return false end
     if not PolCam.CurrentVehicle then return false end
@@ -1089,7 +712,7 @@ local function ScoreCandidate(entity, entityType, camPos, camDir, scanRange, rad
     local perpSq = perpX * perpX + perpY * perpY + perpZ * perpZ
     local perp = math_sqrt(perpSq)
     local denom = math_max(radius, 0.05)
-    local screenScore = math_clamp(1 - (perp / denom), 0.0, 1.0)
+    local screenScore = math_clamp(1 - (perp / (denom * 1.5)), 0.0, 1.0)
 
     local typeScore = entityType == "vehicle" and 1.0 or 0.85
     local minDim, maxDim = GetModelDimensions(GetEntityModel(entity))
@@ -1106,7 +729,7 @@ local function ScoreCandidate(entity, entityType, camPos, camDir, scanRange, rad
     end
 
     local distPenalty = math_clamp(along / scanRange, 0.0, 1.0) * 0.05
-    local score = (screenScore * 1.0) + (typeScore * 0.2) + (sizeScore * 0.1) + prevScore - distPenalty
+    local score = (screenScore * 0.6) + (typeScore * 0.2) + (sizeScore * 0.1) + prevScore - distPenalty
     return score, targetPoint, netId, perp
 end
 
@@ -1161,7 +784,13 @@ local function ScanForTarget()
     local radiusScaling = Config.Tracking.DetectionScaling or 0.05
     local maxRadius = Config.Tracking.DetectionMaxRadius or 75.0
 
-    local radius = math_max(baseRadius, distanceToLookPoint * radiusScaling)
+    local minLookDistance = scanRange * 0.35
+    local effectiveDistance = distanceToLookPoint
+    if effectiveDistance < minLookDistance then
+        effectiveDistance = minLookDistance
+    end
+
+    local radius = math_max(baseRadius, effectiveDistance * radiusScaling)
     local heightDelta = math_abs(camPos.z - (Tracking.debug.probeHitPos and Tracking.debug.probeHitPos.z or camPos.z))
     local heightScale = 1 + math_clamp(heightDelta / 800.0, 0.0, 0.75)
     radius = math_min(radius * heightScale, maxRadius)
@@ -1178,15 +807,16 @@ local function ScanForTarget()
         return
     end
 
-    local probeRadius = math_max(baseRadius * 0.6, radius * 0.35)
-    local offsetDistance = math_max(baseRadius * 1.2, radius * 0.35)
+    local probeRadius = math_max(baseRadius * 0.7, radius * 0.45)
+    local offsetDistance = math_max(baseRadius * 1.0, radius * 0.5)
 
+    -- 5 probes for comprehensive coverage (Center + cardinal directions)
     local probes = {
         { label = "center", offset = vector3(0.0, 0.0, 0.0) },
-        { label = "top", offset = camUp * offsetDistance },
-        { label = "bottom", offset = camUp * -offsetDistance },
-        { label = "left", offset = camRight * -offsetDistance },
-        { label = "right", offset = camRight * offsetDistance }
+        { label = "up", offset = camUp * offsetDistance },
+        { label = "down", offset = -camUp * offsetDistance },
+        { label = "right", offset = camRight * offsetDistance },
+        { label = "left", offset = -camRight * offsetDistance }
     }
 
     local candidates = {}
@@ -1255,9 +885,51 @@ local function ScanForTarget()
         end
     end
 
+    local nowSticky = GetGameTimer()
+    local stickyAllowed = lastCandidateEntity and (nowSticky - lastCandidateTime) <= 1200
+    local maxStickyDistance = scanRange * 0.6
+    if stickyAllowed and lastCandidateEntity and candidates[lastCandidateEntity] then
+        local stickyCoords = GetEntityCoords(lastCandidateEntity)
+        local dx = camPos.x - stickyCoords.x
+        local dy = camPos.y - stickyCoords.y
+        local dz = camPos.z - stickyCoords.z
+        local withinStickyDistance = (dx * dx + dy * dy + dz * dz) <= (maxStickyDistance * maxStickyDistance)
+        if not best or bestEntity ~= lastCandidateEntity then
+            local sticky = candidates[lastCandidateEntity]
+            if withinStickyDistance and (not best or (best.score - sticky.score) <= 0.08) then
+                best = sticky
+                bestEntity = lastCandidateEntity
+            end
+        end
+    end
+
+    if not bestEntity and stickyAllowed and lastCandidateEntity and lastCandidateType and DoesEntityExist(lastCandidateEntity) then
+        local stickyCoords = GetEntityCoords(lastCandidateEntity)
+        local dx = camPos.x - stickyCoords.x
+        local dy = camPos.y - stickyCoords.y
+        local dz = camPos.z - stickyCoords.z
+        if (dx * dx + dy * dy + dz * dz) <= (maxStickyDistance * maxStickyDistance) then
+        local stickyScore, stickyPoint, stickyNetId = ScoreCandidate(lastCandidateEntity, lastCandidateType, camPos, camDir, scanRange, radius)
+        if stickyScore and stickyScore >= 0.15 then
+            bestEntity = lastCandidateEntity
+            best = {
+                score = stickyScore,
+                type = lastCandidateType,
+                hitType = lastCandidateType,
+                hitCoords = GetEntityCoords(lastCandidateEntity),
+                source = "sticky",
+                netId = stickyNetId,
+                targetPoint = stickyPoint
+            }
+        end
+        end
+    end
+
     if not bestEntity or not best then
         Tracking.debug.scanSource = "none"
         SendNUIMessage({ action = "noPotentialTarget" })
+        lastCandidateEntity = nil
+        lastCandidateType = nil
         return
     end
 
@@ -1284,6 +956,9 @@ local function ScanForTarget()
         Tracking.debug.candidateNetId = SafeGetNetworkId(Tracking.candidateEntity)
         Tracking.debug.candidateType = Tracking.candidateType
         lastCandidateNetId = Tracking.debug.candidateNetId
+        lastCandidateEntity = Tracking.candidateEntity
+        lastCandidateType = Tracking.candidateType
+        lastCandidateTime = GetGameTimer()
     end
 
     if shouldLogScans() then
@@ -1309,7 +984,6 @@ end
 local function ResetTrackingState()
     Tracking.candidateEntity = nil
     Tracking.candidateType = nil
-    ResetOcclusionState()
     Tracking.lockStartTime = 0
 end
 
@@ -1324,12 +998,6 @@ end
 local function SendLockClearedToNUI()
     SendNUIMessage({ action = "lockCleared" })
     SendNUIMessage({ action = "hidePilotHUD" })
-end
-
-local function SetReacquirePulse(active)
-    if lastReacquireUiState == active then return end
-    lastReacquireUiState = active
-    SendNUIMessage({ action = "reacquirePulse", active = active })
 end
 
 local function IsTargetInfoCompatible(cachedInfo, newInfo)
@@ -1368,6 +1036,7 @@ function ClearLock()
     local hadLock = PolCam.LockedTarget ~= nil
     
     lastLockedTargetNetId = nil
+    Tracking.occludedSince = nil
 
     PolCam.LockedTarget = nil
     PolCam.LockedTargetType = nil
@@ -1376,7 +1045,6 @@ function ClearLock()
 
     ResetTrackingState()
     ClearHeliTrackingState()
-    SetReacquirePulse(false)
 
     if hadLock then
         TriggerServerEvent('polcam:trackingSync', false, nil, nil)
@@ -1416,7 +1084,6 @@ local function CompleteLock(entity, entityType)
     PolCam.LockedTargetType = entityType
     PolCam.TargetInfo = GetTargetInfo(entity, entityType)
 
-    ResetOcclusionState()
     Tracking.lockStartTime = GetGameTimer()
 
     local targetNetId = SafeGetNetworkId(PolCam.LockedTarget)
@@ -1552,6 +1219,145 @@ function StartLocking()
     end)
 end
 
+-- Occlusion Check
+local function BuildOcclusionSamplePoints(target, targetPoint, targetType)
+    local points = { targetPoint }
+    if targetType == "vehicle" then
+        local minDim, maxDim = GetModelDimensions(GetEntityModel(target))
+        local height = math_max(0.5, maxDim.z - minDim.z)
+        local up = math_min(1.2, height * 0.35)
+        local down = math_min(0.9, height * 0.25)
+        points[#points + 1] = vector3(targetPoint.x, targetPoint.y, targetPoint.z + up)
+        points[#points + 1] = vector3(targetPoint.x, targetPoint.y, targetPoint.z - down)
+    elseif targetType == "ped" then
+        points[#points + 1] = vector3(targetPoint.x, targetPoint.y, targetPoint.z + 0.35)
+        points[#points + 1] = vector3(targetPoint.x, targetPoint.y, targetPoint.z - 0.25)
+    end
+    return points
+end
+
+local function IsOccludedFrom(origin, point, toleranceSq)
+    local rayHandle = StartShapeTestRay(
+        origin.x, origin.y, origin.z,
+        point.x, point.y, point.z,
+        1,
+        PolCam.CurrentVehicle,
+        7
+    )
+    local _, hit, hitCoords, _, _ = GetShapeTestResult(rayHandle)
+    if not hit then
+        return false
+    end
+    if hitCoords then
+        local tolSq = toleranceSq or 0.0
+        local tdx = point.x - origin.x
+        local tdy = point.y - origin.y
+        local tdz = point.z - origin.z
+        local targetDistSq = (tdx * tdx + tdy * tdy + tdz * tdz)
+        local hdx = hitCoords.x - origin.x
+        local hdy = hitCoords.y - origin.y
+        local hdz = hitCoords.z - origin.z
+        local hitDistSq = (hdx * hdx + hdy * hdy + hdz * hdz)
+
+        if hitDistSq >= (targetDistSq - tolSq) then
+            return false
+        end
+
+        if tolSq > 0.0 then
+            local dx = hitCoords.x - point.x
+            local dy = hitCoords.y - point.y
+            local dz = hitCoords.z - point.z
+            if (dx * dx + dy * dy + dz * dz) <= tolSq then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+local function CheckTargetOcclusion(now)
+    local tracking = Config.Tracking
+    if not tracking or not tracking.OcclusionEnabled then return end
+
+    local target = PolCam.LockedTarget
+    if not target or not DoesEntityExist(target) then return end
+
+    local intervalMs = tracking.OcclusionCheckIntervalMs or 150
+    if (now - Tracking.lastOcclusionCheck) < intervalMs then return end
+    Tracking.lastOcclusionCheck = now
+
+    -- Determine ray origin: use camera coords when active, otherwise helicopter position
+    local origin = PolCam.Active and PolCam.CameraCoords or GetHelicopterPosition()
+    if not origin then return end
+
+    local targetPoint = GetEntityTargetPoint(target) or GetEntityCoords(target)
+    local targetType = PolCam.LockedTargetType
+    local samplePoints = BuildOcclusionSamplePoints(target, targetPoint, targetType)
+    local tolerance = tracking.OcclusionNearTargetTolerance or 2.0
+    local toleranceSq = tolerance * tolerance
+    local occluded = true
+
+    for i = 1, #samplePoints do
+        if not IsOccludedFrom(origin, samplePoints[i], toleranceSq) then
+            occluded = false
+            break
+        end
+    end
+
+    if Config.Debug and Config.Debug.Enabled and Config.Debug.ShowScanDetails then
+        Tracking.debug.occluded = occluded
+        Tracking.debug.occlusionAgeMs = Tracking.occludedSince and (now - Tracking.occludedSince) or 0
+        Tracking.debug.occlusionHitType = "none"
+        Tracking.debug.occlusionHitModel = nil
+        Tracking.debug.occlusionHitPos = nil
+        Tracking.debug.occlusionHitEntity = nil
+
+        if occluded then
+            local rayHandle = StartShapeTestRay(
+                origin.x, origin.y, origin.z,
+                targetPoint.x, targetPoint.y, targetPoint.z,
+                -1,
+                PolCam.CurrentVehicle,
+                7
+            )
+            local _, hit, hitCoords, _, hitEntity = GetShapeTestResult(rayHandle)
+            if hit then
+                Tracking.debug.occlusionHitPos = hitCoords
+                Tracking.debug.occlusionHitEntity = hitEntity
+                if hitEntity and hitEntity ~= 0 and DoesEntityExist(hitEntity) then
+                    if IsEntityAVehicle(hitEntity) then
+                        local modelHash = GetEntityModel(hitEntity)
+                        local modelName = GetDisplayNameFromVehicleModel(modelHash)
+                        Tracking.debug.occlusionHitType = "vehicle"
+                        Tracking.debug.occlusionHitModel = modelName ~= "" and modelName or tostring(modelHash)
+                    elseif IsEntityAPed(hitEntity) then
+                        Tracking.debug.occlusionHitType = IsPedAPlayer(hitEntity) and "player" or "ped"
+                    else
+                        Tracking.debug.occlusionHitType = "entity"
+                    end
+                else
+                    Tracking.debug.occlusionHitType = "world"
+                end
+            end
+        end
+    end
+
+    if occluded then
+        -- Target is occluded
+        if not Tracking.occludedSince then
+            Tracking.occludedSince = now
+        end
+        local graceMs = tracking.OcclusionGracePeriodMs or 3000
+        if (now - Tracking.occludedSince) >= graceMs then
+            ClearLock()
+            PlayPolCamSound("TargetLost")
+        end
+    else
+        -- Line of sight is clear
+        Tracking.occludedSince = nil
+    end
+end
+
 -- Active Tracking Update
 local function UpdateActiveTracking(now)
     if not PolCam.LockedTarget or not DoesEntityExist(PolCam.LockedTarget) then
@@ -1560,162 +1366,10 @@ local function UpdateActiveTracking(now)
         return
     end
 
-    local occ = GetOcclusionConfig()
+    CheckTargetOcclusion(now)
 
-    if occ.Enabled and (PolCam.Active or PersistentTracking.Active) then
-        if occ.AcquireGraceMs and occ.AcquireGraceMs > 0 and Tracking.lockStartTime and Tracking.lockStartTime > 0 then
-            if (now - Tracking.lockStartTime) < occ.AcquireGraceMs then
-                Tracking.hasLOS = true
-                OcclusionState.occludedSince = 0
-                OcclusionState.occlusionType = nil
-                OcclusionState.lastCheckTime = 0
-                UpdateLockedTargetInfo()
-                return
-            end
-        end
-
-        local checkInterval = occ.CheckIntervalMs
-        if not PolCam.Active and PersistentTracking.Active and OcclusionState.occludedSince ~= 0 then
-            checkInterval = 0
-        end
-        local shouldCheck = (OcclusionState.lastCheckTime == 0) or (now - OcclusionState.lastCheckTime >= checkInterval)
-        if shouldCheck then
-            OcclusionState.lastCheckTime = now
-
-            local hasLOS, targetPoint, occlusionType = HasCameraLineOfSight(PolCam.LockedTarget, occ)
-            Tracking.hasLOS = hasLOS
-
-            local maxOccluded = occ.MaxOccludedMs
-            local extraGrace = 0
-            local crosshairOk = false
-            local ignoreOcclusion = false
-            local shouldClear = false
-
-            if hasLOS then
-                OcclusionState.occludedSince = 0
-                OcclusionState.occlusionType = nil
-                OcclusionState.reacquiring = false
-                OcclusionState.reacquireStartTime = 0
-            else
-                if OcclusionState.occludedSince == 0 then
-                    OcclusionState.occludedSince = now
-                    OcclusionState.occlusionType = occlusionType
-                else
-                    if occlusionType and OcclusionState.occlusionType then
-                        local priority = { [OCCLUSION_TYPE_NONE] = 0, [OCCLUSION_TYPE_VEGETATION] = 1, [OCCLUSION_TYPE_BUILDING] = 2, [OCCLUSION_TYPE_TERRAIN] = 3 }
-                        if priority[occlusionType] > priority[OcclusionState.occlusionType] then
-                            OcclusionState.occlusionType = occlusionType
-                        end
-                    end
-                end
-
-                if occ.TerrainAware and OcclusionState.occlusionType then
-                    if OcclusionState.occlusionType == OCCLUSION_TYPE_TERRAIN then
-                        maxOccluded = occ.TerrainMaxOccludedMs or 0
-                    elseif OcclusionState.occlusionType == OCCLUSION_TYPE_BUILDING then
-                        maxOccluded = occ.BuildingMaxOccludedMs or occ.MaxOccludedMs
-                    elseif OcclusionState.occlusionType == OCCLUSION_TYPE_VEGETATION then
-                        if occ.VegetationIgnored then
-                            OcclusionState.occludedSince = 0
-                            OcclusionState.occlusionType = nil
-                            OcclusionState.reacquiring = false
-                            OcclusionState.reacquireStartTime = 0
-                            ignoreOcclusion = true
-                        end
-                    end
-                end
-
-                if occ.CrosshairGraceMs and occ.CrosshairGraceMs > 0 and occ.CrosshairMaxAngleDeg and occ.CrosshairMaxAngleDeg > 0 then
-                    if targetPoint and IsTargetWithinCrosshair(targetPoint, occ.CrosshairMaxAngleDeg) then
-                        extraGrace = occ.CrosshairGraceMs
-                        crosshairOk = true
-                    end
-                end
-
-                maxOccluded = maxOccluded + extraGrace
-
-                -- Baked-in reacquisition: instead of clearing immediately, enter reacquisition phase
-                local REACQUIRE_GRACE_MS = 3000 -- 3 seconds of reacquisition attempts
-                
-                if (now - OcclusionState.occludedSince) >= maxOccluded then
-                    -- Time to enter or continue reacquisition phase
-                    if not OcclusionState.reacquiring then
-                        OcclusionState.reacquiring = true
-                        OcclusionState.reacquireStartTime = now
-                        if shouldLogEvents() then
-                            print('[PolCam] Entering reacquisition phase')
-                        end
-                    end
-                    
-                    -- Check if reacquisition grace period also expired
-                    if (now - OcclusionState.reacquireStartTime) >= REACQUIRE_GRACE_MS then
-                        shouldClear = true
-                        if shouldLogEvents() then
-                            print('[PolCam] Reacquisition failed - clearing lock')
-                        end
-                    end
-                end
-            end
-
-            local occludedMs = 0
-            if OcclusionState.occludedSince ~= 0 then
-                occludedMs = now - OcclusionState.occludedSince
-            end
-            
-            local reacquireMs = 0
-            if OcclusionState.reacquiring and OcclusionState.reacquireStartTime > 0 then
-                reacquireMs = now - OcclusionState.reacquireStartTime
-            end
-
-            local occlusionTypeFinal = OcclusionState.occlusionType or occlusionType or OCCLUSION_TYPE_NONE
-            Tracking.debug.losTargetPoint = targetPoint
-            Tracking.debug.occlusion = {
-                hasLOS = Tracking.hasLOS,
-                occlusionType = occlusionTypeFinal,
-                occludedMs = occludedMs,
-                maxOccludedMs = maxOccluded,
-                extraGraceMs = extraGrace,
-                crosshairOk = crosshairOk,
-                lastCheckTime = OcclusionState.lastCheckTime,
-                ignored = ignoreOcclusion,
-                reacquiring = OcclusionState.reacquiring,
-                reacquireMs = reacquireMs
-            }
-
-            SetReacquirePulse(OcclusionState.reacquiring)
-
-            if shouldLogEvents() then
-                if lastLosLogHasLOS ~= Tracking.hasLOS or lastLosLogOccType ~= occlusionTypeFinal then
-                    print(('[PolCam] LOS=%s occ=%s occludedMs=%d maxMs=%d extra=%d crosshair=%s reacquiring=%s'):format(
-                        tostring(Tracking.hasLOS),
-                        tostring(occlusionTypeFinal),
-                        tonumber(occludedMs) or 0,
-                        tonumber(maxOccluded) or 0,
-                        tonumber(extraGrace) or 0,
-                        tostring(crosshairOk),
-                        tostring(OcclusionState.reacquiring)
-                    ))
-                    lastLosLogHasLOS = Tracking.hasLOS
-                    lastLosLogOccType = occlusionTypeFinal
-                end
-            end
-
-            if ignoreOcclusion then
-                UpdateLockedTargetInfo()
-                return
-            end
-
-            if shouldClear then
-                SetReacquirePulse(false)
-                ClearLock()
-                PlayPolCamSound("TargetLost")
-                return
-            end
-        end
-    else
-        SetReacquirePulse(false)
-        ResetOcclusionState()
-    end
+    -- Target may have been cleared by occlusion check
+    if not PolCam.LockedTarget then return end
 
     UpdateLockedTargetInfo()
 end
@@ -1738,12 +1392,17 @@ local function DrawWorldTargetLabel()
 
     local target = PolCam.LockedTarget
     local info = PolCam.TargetInfo
-    if not target or not info or not info.coords then return end
+    if not target or not DoesEntityExist(target) or not info or not info.coords then return end
 
     local camCoords = PolCam.Active and PolCam.CameraCoords or GetEntityCoords(PlayerPedId())
     if not camCoords then return end
 
-    local distance = info.distance or #(camCoords - info.coords)
+    local currentTargetCoords = GetEntityCoords(target)
+    if not currentTargetCoords or currentTargetCoords == vector3(0,0,0) then
+        currentTargetCoords = info.coords
+    end
+
+    local distance = #(camCoords - currentTargetCoords)
     if cfg.MaxDistance and distance > cfg.MaxDistance then return end
 
     local now = GetGameTimer()
@@ -1758,7 +1417,11 @@ local function DrawWorldTargetLabel()
     Tracking.labelLastUpdateTime = now
 
     local smoothingSpeed = (cfg and cfg.LabelSmoothingSpeed) or 12.0
-    local t = 1 - math_exp(-smoothingSpeed * dt)
+    local t = 1.0
+    if dt < 1.0 then
+        t = 1.0 - math_exp(-smoothingSpeed * dt)
+    end
+    
     local smoothedDistance = Tracking.labelSmoothedDistance or distance
     smoothedDistance = smoothedDistance + (distance - smoothedDistance) * t
     Tracking.labelSmoothedDistance = smoothedDistance
@@ -1768,7 +1431,7 @@ local function DrawWorldTargetLabel()
         zOffset = cfg.HeightOffsetPed or 1.0
     end
 
-    local pos = info.coords + vector3(0.0, 0.0, zOffset)
+    local pos = currentTargetCoords + vector3(0.0, 0.0, zOffset)
 
     local scale = 0.35
     if distance and distance > 0.0 then
@@ -2043,7 +1706,6 @@ function GetTargetInfo(entity, entityType)
         speed = math_floor(GetEntitySpeed(entity) * 2.236936),
         heading = math_floor(GetEntityHeading(entity)),
         distance = heliPos and #(heliPos - coords) or 0,
-        hasLOS = Tracking.hasLOS
     }
     
     if entityType == "vehicle" then
@@ -2176,6 +1838,12 @@ function PersistentTrackingLoop()
                     PlayPolCamSound("TargetLost")
                 else
                     local now = GetGameTimer()
+                    CheckTargetOcclusion(now)
+
+                    if not PolCam.LockedTarget then
+                        goto continue
+                    end
+
                     UpdateActiveTracking(now)
 
                     if PolCam.LockedTarget then
@@ -2215,10 +1883,11 @@ function PersistentTrackingLoop()
                 end
             end
 
+            ::continue::
             Wait(PersistentTracking.UpdateIntervalMs)
         end
     end
-    
+
     PersistentTracking.LoopRunning = false
 end
 

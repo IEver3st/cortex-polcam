@@ -8,7 +8,7 @@ Config = {}
 -- CORE SETTINGS
 Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }
-Config.InstantLock = false
+Config.InstantLock = true
 Config.Lib = { Notify = 'auto' }
 
 Config.Keybinds = {
@@ -17,7 +17,8 @@ Config.Keybinds = {
     ToggleStreets = "N",
     ToggleHover   = "X",
     ToggleOrbit   = "O",
-    Spotlight     = "H",
+    Spotlight     = "L",
+    CycleSpotlightColor = "K",
     CycleVision   = "V",
     LockTarget    = "SPACE",
     GroundLock    = "T",
@@ -41,23 +42,13 @@ Config.Tracking = {
     Enabled = true, LockDurationMs = 1200,
     TrackVehicles = true, TrackPeds = true,
     TrackingSpeed = 12.0,
-    DetectionBaseRadius = 1.5, DetectionScaling = 0.015, DetectionMaxRadius = 25.0,
+    DetectionBaseRadius = 3.0, DetectionScaling = 0.025, DetectionMaxRadius = 35.0,
     TargetingMaxDistanceVehicles = 1000.0, TargetingMaxDistancePeds = 1000.0,
     UsePoolFallbackTargeting = true, PlateVisibilityAngle = 45.0,
-    Occlusion = {
-        Enabled = true,
-        CheckIntervalMs = 150,
-        MaxOccludedMs = 5000,
-        AcquireGraceMs = 1500,
-        RayRadius = 0.35,
-        SampleHeights = { 0.55, 0.9 },
-        CrosshairGraceMs = 1000,
-        CrosshairMaxAngleDeg = 6.0,
-        TerrainAware = true,
-        TerrainMaxOccludedMs = 0,
-        BuildingMaxOccludedMs = 2500,
-        VegetationIgnored = true,
-    },
+    OcclusionEnabled = true,
+    OcclusionGracePeriodMs = 3000,
+    OcclusionCheckIntervalMs = 150,
+    OcclusionNearTargetTolerance = 2.0,
 }
 
 -- UI SETTINGS
@@ -67,8 +58,9 @@ Config.UI = {
         Enabled = true, ShowWhenCameraActive = true, ShowWhenCameraOff = true,
         ShowWhilePersistent = true, MaxDistance = 1500.0,
         HeightOffsetPed = 1.0, HeightOffsetVehicle = 1.6,
+        LabelSmoothingSpeed = 12.0,
     },
-    HighContrast = { Enabled = true, Theme = "green" },
+    HighContrast = { Enabled = true, Theme = "blue" }, -- Options: green, black, orange, red, purple, blue, pink OR a Hex Code (e.g. "#FF00FF")
 }
 
 -- VISION SETTINGS
@@ -88,9 +80,9 @@ Config.CameraLabels = {
 
 -- FEATURES
 Config.Spotlight = {
-    Enabled = true, SyncWithCamera = true, Brightness = 10.0, Range = 400.0, Radius = 15.0,
-    Color = {255, 255, 255},
-    NetSync = { PositionIntervalMs = 50, BroadcastIntervalMs = 50, MinMoveDistance = 0.1, SmoothingSpeed = 12.0 }
+    Enabled = true, SyncWithCamera = true, Brightness = 10.0, Range = 400.0, Radius = 10.0,
+    Color = {170, 185, 255},
+    NetSync = { PositionIntervalMs = 150, BroadcastIntervalMs = 150, MinMoveDistance = 0.25, SmoothingSpeed = 12.0 }
 }
 
 Config.POI = { Enabled = true, MaxPOIs = 10, ExpiryTime = 300, SyncToOthers = true }
@@ -176,15 +168,15 @@ Config.EsHud = {
 }
 
 Config.Debug = {
-    Enabled = true,
-    ToolsEnabled = true, -- If false: no debug menu/keybind is registered and (with fxmanifest) debug.lua isn't loaded
-    ShowRaycast = true, ShowDetectionRadius = true, ShowHitPoint = true,
-    ShowLOSRay = true, ShowTargetBox = true, ShowDebugPanel = true,
-    ShowDistanceInfo = true, ShowRadiusInfo = true, ShowEntityInfo = true, ShowLOSStatus = true,
-    ShowScanDetails = true, ShowOcclusionDetails = true, ShowSharedState = true,
-    LogEvents = true, LogScans = true,
+    Enabled = false,
+    ToolsEnabled = false, -- If false: no debug menu/keybind is registered and (with fxmanifest) debug.lua isn't loaded
+    ShowRaycast = true, ShowDetectionRadius = false, ShowHitPoint = false,
+    ShowTargetBox = false, ShowDebugPanel = false,
+    ShowDistanceInfo = false, ShowRadiusInfo = false, ShowEntityInfo = false,
+    ShowScanDetails = false, ShowSharedState = false,
+    LogEvents = false, LogScans = false,
     RaycastColor = {0, 255, 255, 200}, DetectionColor = {255, 255, 0, 100}, HitPointColor = {0, 255, 0, 255},
-    LOSColor = {0, 255, 0, 200}, LOSBlockedColor = {255, 0, 0, 200}, TargetBoxColor = {255, 128, 0, 200}
+    TargetBoxColor = {255, 128, 0, 200}
 }
 
 Config.Intervals = {

@@ -467,17 +467,42 @@ function updateTime() {
 // ============================================================================
 // High Contrast Mode
 // ============================================================================
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
 function setHighContrast(enabled, theme) {
     State.highContrastEnabled = !!enabled;
     State.highContrastTheme = theme || 'green';
 
-    document.body.classList.remove('highcontrast-green', 'highcontrast-black');
+    // Remove all highcontrast classes
+    const classes = Array.from(document.body.classList).filter(c => c.startsWith('highcontrast-'));
+    if (classes.length > 0) {
+        document.body.classList.remove(...classes);
+    }
+
+    // Clear inline styles
+    document.body.style.removeProperty('--hud-color');
+    document.body.style.removeProperty('--hud-glow');
+    document.body.style.removeProperty('--hud-dim');
+    document.body.style.removeProperty('--hud-bg');
 
     if (State.highContrastEnabled) {
-        if (State.highContrastTheme === 'black') {
-            document.body.classList.add('highcontrast-black');
+        if (State.highContrastTheme.startsWith('#')) {
+            const rgb = hexToRgb(State.highContrastTheme);
+            if (rgb) {
+                document.body.style.setProperty('--hud-color', State.highContrastTheme);
+                document.body.style.setProperty('--hud-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
+                document.body.style.setProperty('--hud-dim', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`);
+                document.body.style.setProperty('--hud-bg', `rgba(0, 0, 0, 0.7)`);
+            }
         } else {
-            document.body.classList.add('highcontrast-green');
+            document.body.classList.add(`highcontrast-${State.highContrastTheme}`);
         }
     }
 }
@@ -541,11 +566,10 @@ function setSpotlightStatus(active) {
 function ensureHighContrastApplied() {
     if (!State.highContrastEnabled) return;
 
-    const hasClass =
-        document.body.classList.contains('highcontrast-green') ||
-        document.body.classList.contains('highcontrast-black');
+    const hasHighContrastClass = Array.from(document.body.classList).some(c => c.startsWith('highcontrast-'));
+    const hasInlineStyles = document.body.style.getPropertyValue('--hud-color') !== '';
 
-    if (!hasClass) {
+    if (!hasHighContrastClass && !hasInlineStyles) {
         setHighContrast(true, State.highContrastTheme);
     }
 }

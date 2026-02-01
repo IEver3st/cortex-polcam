@@ -9,6 +9,9 @@ local GetClosestVehicleNodeWithHeading = GetClosestVehicleNodeWithHeading
 local GetStreetNameAtCoord = GetStreetNameAtCoord
 local GetStreetNameFromHashKey = GetStreetNameFromHashKey
 local GetGameTimer = GetGameTimer
+local GetEntityCoords = GetEntityCoords
+local CreateThread = CreateThread
+local Wait = Wait
 local SetTextScale = SetTextScale
 local SetTextFont = SetTextFont
 local SetTextColour = SetTextColour
@@ -32,13 +35,13 @@ local LastUpdateX = 0
 local LastUpdateY = 0
 
 -- Config (can be overridden from Config.StreetOverlay)
-local UPDATE_INTERVAL = 1500         -- Increase time between updates
-local UPDATE_DISTANCE_SQ = 100.0 * 100.0 -- Increase distance threshold to 100m
+local UPDATE_INTERVAL = 2000         -- Time between updates (reduced frequency)
+local UPDATE_DISTANCE_SQ = 120.0 * 120.0 -- Distance threshold before re-scanning
 local SAMPLE_RADIUS = 150.0          -- Slightly smaller radius
-local SAMPLE_SPACING = 75.0          -- Slightly larger spacing (fewer samples)
-local LABEL_SPACING_SQ = 120.0 * 120.0 -- Increase spacing between identical street labels
-local MAX_LABELS = 12                -- Reduce max labels from 20 to 12
-local MAX_DRAW_DISTANCE_SQ = 600.0 * 600.0 -- Max distance from camera to draw a label
+local SAMPLE_SPACING = 85.0          -- Larger spacing (fewer samples = fewer raycasts)
+local LABEL_SPACING_SQ = 140.0 * 140.0 -- Spacing between identical street labels
+local MAX_LABELS = 8                 -- Fewer labels to reduce raycast + draw overhead
+local MAX_DRAW_DISTANCE_SQ = 500.0 * 500.0 -- Max distance from camera to draw a label
 
 -- Text settings
 local TEXT_SCALE = 0.22
@@ -172,12 +175,13 @@ CreateThread(function()
             end
         end
         
-        -- Draw labels (optimized - distance culling)
-        local heliCoords = GetEntityCoords(PolCam.CurrentVehicle)
+        -- Draw labels (optimized - distance culling, max per frame)
+        local drawn = 0
+        local MAX_DRAW_PER_FRAME = 4  -- limit draw calls per frame to reduce GPU pressure
         for i = 1, LabelsCount do
+            if drawn >= MAX_DRAW_PER_FRAME then break end
             local lbl = Labels[i]
-            
-            -- Only attempt to draw if reasonably close to the camera's focus/heli
+
             local distDx = lbl.x - camPos.x
             local distDy = lbl.y - camPos.y
             if (distDx*distDx + distDy*distDy) < MAX_DRAW_DISTANCE_SQ then
@@ -191,10 +195,11 @@ CreateThread(function()
                     BeginTextCommandDisplayText("STRING")
                     AddTextComponentSubstringPlayerName(lbl.name)
                     EndTextCommandDisplayText(sx, sy)
+                    drawn = drawn + 1
                 end
             end
         end
-        
+
         ::continue::
     end
 end)

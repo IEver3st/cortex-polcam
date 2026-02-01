@@ -195,6 +195,13 @@ function UpdateCameraPosition()
     UpdateStreamingFocus()
 end
 
+local lastFocusUpdate = 0
+local FOCUS_UPDATE_INTERVAL = 100 -- ms between SetFocusPosAndVel calls
+local lastHdAreaUpdate = 0
+local HD_AREA_UPDATE_INTERVAL = 500 -- ms between SetHdArea calls (expensive)
+local lastHdAreaPos = nil
+local HD_AREA_MIN_MOVE_SQ = 25.0 * 25.0 -- only update HdArea if focus moved 25m+
+
 function UpdateStreamingFocus()
     if not PolCam.Active then return end
     if not Config or not Config.Camera or not Config.Camera.StreamingFocusEnabled then return end
@@ -211,12 +218,27 @@ function UpdateStreamingFocus()
 
     if not focusPos then return end
 
-    if SetFocusPosAndVel then
+    local now = GetGameTimer()
+
+    -- Throttle SetFocusPosAndVel to every 100ms (still smooth, saves GPU streaming pressure)
+    if SetFocusPosAndVel and (now - lastFocusUpdate) >= FOCUS_UPDATE_INTERVAL then
+        lastFocusUpdate = now
         SetFocusPosAndVel(focusPos.x, focusPos.y, focusPos.z, 0.0, 0.0, 0.0)
     end
 
-    if Config.Camera.HdAreaEnabled and SetHdArea then
-        SetHdArea(focusPos.x, focusPos.y, focusPos.z, Config.Camera.HdAreaRadius or 200.0)
+    -- Throttle SetHdArea more aggressively and only when focus moved significantly
+    if Config.Camera.HdAreaEnabled and SetHdArea and (now - lastHdAreaUpdate) >= HD_AREA_UPDATE_INTERVAL then
+        local shouldUpdate = not lastHdAreaPos
+        if not shouldUpdate then
+            local dx = focusPos.x - lastHdAreaPos.x
+            local dy = focusPos.y - lastHdAreaPos.y
+            shouldUpdate = (dx * dx + dy * dy) >= HD_AREA_MIN_MOVE_SQ
+        end
+        if shouldUpdate then
+            lastHdAreaUpdate = now
+            lastHdAreaPos = vector3(focusPos.x, focusPos.y, focusPos.z)
+            SetHdArea(focusPos.x, focusPos.y, focusPos.z, Config.Camera.HdAreaRadius or 200.0)
+        end
     end
 end
 
@@ -309,7 +331,7 @@ function TrackLockedTarget()
 end
 
 local lastGroundCheck = 0
-local GROUND_CHECK_INTERVAL = 50
+local GROUND_CHECK_INTERVAL = 66
 
 function UpdateGroundCoords()
     local now = GetGameTimer()

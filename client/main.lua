@@ -28,7 +28,6 @@ local DisableControlAction = DisableControlAction
 local DisplayRadar = DisplayRadar
 local SendNUIMessage = SendNUIMessage
 local IsControlPressed = IsControlPressed
-local IsControlPressed = IsControlPressed
 local IsControlJustPressed = IsControlJustPressed
 local NetworkGetNetworkIdFromEntity = NetworkGetNetworkIdFromEntity
 local NetworkGetEntityFromNetworkId = NetworkGetEntityFromNetworkId
@@ -411,6 +410,16 @@ local function RegisterKeybinds()
                 ToggleSpotlight()
             end
         end, false)
+
+        -- Cycle Spotlight Color
+        if Config.Keybinds.CycleSpotlightColor then
+            RegisterKeyMapping('polcam_spotlight_color', 'PolCam: Cycle Spotlight Color', 'keyboard', Config.Keybinds.CycleSpotlightColor)
+            RegisterCommand('polcam_spotlight_color', function()
+                if PolCam.Active and CycleSpotlightColor then
+                    CycleSpotlightColor()
+                end
+            end, false)
+        end
     end
     
     -- Hover Mode (pilot only)

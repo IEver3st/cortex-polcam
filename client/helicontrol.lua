@@ -2,6 +2,7 @@ local DoesEntityExist = DoesEntityExist
 local GetEntityCoords = GetEntityCoords
 local GetEntityVelocity = GetEntityVelocity
 local SetEntityVelocity = SetEntityVelocity
+local DoesEntityExist = DoesEntityExist
 local GetEntityHeading = GetEntityHeading
 local GetPedInVehicleSeat = GetPedInVehicleSeat
 local PlayerPedId = PlayerPedId
