@@ -1,5 +1,8 @@
 # PolCam - Police Helicopter Camera System
-
+![Blue Helicopter Theme Tracking a vehicle with the spotlight enabled.](https://media.discordapp.net/attachments/723540538627981362/1467627747051569265/image.png?ex=6981125a&is=697fc0da&hm=ea42f7045f5236b888321a9accb477299b1cc30a0ce8091759718ae2d998159a&=&format=webp&quality=lossless&width=2129&height=1198)
+![Orange Heli Theme iwht spotlight enabled in Freecam](https://media.discordapp.net/attachments/723540538627981362/1467627748120858799/image.png?ex=6981125a&is=697fc0da&hm=fbe0015e783dd164e120a06b63b7a458d01283daf881368488bdde0013109faf&=&format=webp&quality=lossless&width=2131&height=1198)
+![Heli HUD that is shown outside of the camera while a track is active or hover is active.](https://media.discordapp.net/attachments/723540538627981362/1467627748582494342/image.png?ex=6981125a&is=697fc0da&hm=01948b1d018873cdb455a0a8cbff569fd0622683d611345a5329701e3b4ab8fc&=&format=webp&quality=lossless&width=1493&height=1081)
+![Green Hud Tracking a Vehicle](https://media.discordapp.net/attachments/723540538627981362/1467627749702111546/image.png?ex=6981125a&is=697fc0da&hm=7fda148cfe2d10639e4402b82d04ee3b73e033276bcaa29c67b9d837ebde323c&=&format=webp&quality=lossless&width=2131&height=1198)
 A FLIR-style police helicopter camera system for FiveM with target tracking, spotlight, hover/orbit autopilot, rappelling, and multi-crew synchronization.
 
 ## Dependencies
