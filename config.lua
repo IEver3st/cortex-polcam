@@ -6,7 +6,7 @@ Config = {}
 -- CORE SETTINGS
 Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }
-Config.InstantLock = true
+Config.InstantLock = false
 Config.Lib = { Notify = 'auto' }
 
 Config.Keybinds = {
