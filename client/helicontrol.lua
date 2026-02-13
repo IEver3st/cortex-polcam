@@ -2,7 +2,6 @@ local DoesEntityExist = DoesEntityExist
 local GetEntityCoords = GetEntityCoords
 local GetEntityVelocity = GetEntityVelocity
 local SetEntityVelocity = SetEntityVelocity
-local DoesEntityExist = DoesEntityExist
 local GetEntityHeading = GetEntityHeading
 local GetPedInVehicleSeat = GetPedInVehicleSeat
 local PlayerPedId = PlayerPedId
@@ -21,7 +20,6 @@ local GetVehicleEngineHealth = GetVehicleEngineHealth
 local GetVehicleBodyHealth = GetVehicleBodyHealth
 local IsVehicleEngineOn = IsVehicleEngineOn
 local GetHeadingFromVector_2d = GetHeadingFromVector_2d
-local GetEntityHeading = GetEntityHeading
 local SetEntityHeading = SetEntityHeading
 
 local math_sqrt = math.sqrt
@@ -403,7 +401,7 @@ CreateThread(function()
                         print("[PolCam] Hover disabled: Avionics damaged during flight")
                     end
                 else
-                    wait = 0
+                    wait = 5
                     
                     local coords = GetEntityCoords(heli)
                     local velocity = GetEntityVelocity(heli)
@@ -628,10 +626,4 @@ end
 
 function IsOrbitActive()
     return HeliControl.OrbitMode
-end
-local function SmoothHeading(currentHeading, targetHeading, smoothing, dt)
-    local delta = ((targetHeading - currentHeading + 540) % 360) - 180
-    local t = dt * smoothing
-    if t > 1 then t = 1 end
-    return (currentHeading + (delta * t)) % 360
 end

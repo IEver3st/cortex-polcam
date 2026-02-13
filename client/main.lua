@@ -1113,8 +1113,10 @@ function CameraLoop()
                 ToggleGroundLock()
             end
         end
-        -- Check if still in valid helicopter
         if not IsInAllowedHelicopter() then
+            if ClearLock then
+                ClearLock()
+            end
             DeactivatePolCam()
             break
         end

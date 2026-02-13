@@ -381,6 +381,16 @@ function LerpAngle(a, b, t)
     return a + diff * t
 end
 
+function ResetCameraZoomToDefault()
+    local defaultZoom = Config.Camera.DefaultZoom or 5.0
+    PolCam.Zoom = defaultZoom
+    PolCam.TargetZoom = defaultZoom
+    PolCam.FOV = CalculateFOV(defaultZoom)
+    if PolCam.Camera and DoesCamExist(PolCam.Camera) then
+        SetCamFov(PolCam.Camera, PolCam.FOV)
+    end
+end
+
 function GetHeadingFromVector_2d(dx, dy)
     local heading = -math_deg(math_atan2(dx, dy))
     return heading < 0 and heading + 360 or heading

@@ -664,6 +664,12 @@ local function IsHeliEntity(entity)
             return true
         end
     end
+    if IsEntityAPed(entity) and IsPedInAnyVehicle(entity, false) then
+        local pedVeh = GetVehiclePedIsIn(entity, false)
+        if pedVeh == PolCam.CurrentVehicle then
+            return true
+        end
+    end
     return false
 end
 
@@ -1048,6 +1054,10 @@ function ClearLock()
 
     if hadLock then
         TriggerServerEvent('polcam:trackingSync', false, nil, nil)
+
+        if ResetCameraZoomToDefault then
+            ResetCameraZoomToDefault()
+        end
     end
 
     SendLockClearedToNUI()
@@ -1567,6 +1577,11 @@ local function SyncLocalLockToHeliState()
                     ))
                 end
             end
+
+            if PersistentTracking.Active and not PersistentTracking.LoopRunning then
+                PersistentTracking.LoopRunning = true
+                CreateThread(PersistentTrackingLoop)
+            end
         else
             lastLockedTargetNetId = nil
             PolCam.LockedTarget = nil
@@ -1574,6 +1589,9 @@ local function SyncLocalLockToHeliState()
             PolCam.TargetInfo = nil
             PersistentTracking.Active = false
             SendNUIMessage({ action = "lockCleared" })
+            if ResetCameraZoomToDefault then
+                ResetCameraZoomToDefault()
+            end
             if shouldLogEvents() then
                 print('[PolCam] shared lock cleared (missing entity)')
             end
@@ -1592,6 +1610,9 @@ local function SyncLocalLockToHeliState()
         SendLockClearedToNUI()
         
         if hadLock or hadPersistent then
+            if ResetCameraZoomToDefault then
+                ResetCameraZoomToDefault()
+            end
             if PlayPolCamSound then
                 PlayPolCamSound("TargetLost")
             end
@@ -1871,6 +1892,15 @@ function PersistentTrackingLoop()
         if PolCam.Active then
             Wait(500)
         else
+            local ped = PlayerPedId()
+            local currentVeh = GetVehiclePedIsIn(ped, false)
+            if currentVeh == 0 or not DoesEntityExist(currentVeh) then
+                if PolCam.LockedTarget or PersistentTracking.Active then
+                    ClearLock()
+                end
+                break
+            end
+
             if PersistentTracking.Active and PolCam.LockedTarget and HeliTrackingState.active then
                 if not DoesEntityExist(PolCam.LockedTarget) then
                     ClearLock()
@@ -1933,8 +1963,19 @@ end
 function PersistentTrackingRenderLoop()
     while true do
         if not PolCam.Active and PersistentTracking.Active and PolCam.LockedTarget and HeliTrackingState.active then
-            DrawWorldTargetLabel()
-            Wait(0)
+            local ped = PlayerPedId()
+            local currentVeh = GetVehiclePedIsIn(ped, false)
+
+            -- If the player leaves the helicopter, immediately clear the lock/UI instead of
+            -- keeping the world label on screen until another loop catches up.
+            if currentVeh == 0 or not DoesEntityExist(currentVeh) then
+                ClearLock()
+                PersistentTracking.Active = false
+                Wait(100)
+            else
+                DrawWorldTargetLabel()
+                Wait(0)
+            end
         else
             Wait(100)
         end
