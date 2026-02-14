@@ -202,6 +202,9 @@ window.addEventListener('message', (event) => {
         case 'hidePilotHUD':
             hidePilotHUD();
             break;
+        case 'applyClientSettings':
+            applyClientSettings(data.data);
+            break;
     }
 });
 
@@ -257,6 +260,14 @@ function hideHUD() {
 
 function updateHUD(data) {
     if (!State.visible) return;
+
+    if (data.highContrast && data.highContrast.enabled !== undefined) {
+        setHighContrast(data.highContrast.enabled, data.highContrast.theme);
+    }
+
+    if (data.trackColors) {
+        applyTrackColors(data.trackColors);
+    }
 
     const dt = getDtSeconds();
     // UI smoothing (time-based): higher = snappier.
@@ -813,5 +824,17 @@ function applyTrackColors(trackColors) {
 function hidePilotHUD() {
     if (Elements.pilotHud) {
         Elements.pilotHud.classList.add('hidden');
+    }
+}
+
+function applyClientSettings(data) {
+    if (!data) return;
+
+    if (data.highContrast && data.highContrast.enabled !== undefined) {
+        setHighContrast(data.highContrast.enabled, data.highContrast.theme);
+    }
+
+    if (data.trackColors) {
+        applyTrackColors(data.trackColors);
     }
 }

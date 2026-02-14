@@ -76,8 +76,10 @@ Config.CameraLabels = {
         ["gsd11bell"] = "BLAINE COUNTY SHERIFF'S OFFICE",
         ["maverick"] = "SAN ANDREAS STATE POLICE",
     },
-    LiveryLabels = { ["polmav"] = { [0] = "LSPD", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" } },
-    LiveryLabels = { ["gsd11bell"] = { [0] = "SAN ANDREAS STATE TROOPER", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" } },
+    LiveryLabels = {
+        ["polmav"] = { [0] = "LSPD", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" },
+        ["gsd11bell"] = { [0] = "SAN ANDREAS STATE TROOPER", [1] = "LSPD AIR-2", [2] = "VINEWOOD AIR UNIT" },
+    },
 }
 
 -- FEATURES

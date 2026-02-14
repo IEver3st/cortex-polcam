@@ -371,10 +371,16 @@ end
 -- Receive other players' rappel events for visual effects
 RegisterNetEvent('polcam:syncRappel')
 AddEventHandler('polcam:syncRappel', function(data)
-    local sourcePlayer = source
+    if type(data) ~= 'table' then return end
+
+    local sourcePlayer = tonumber(data.source)
+    if not sourcePlayer then return end
+
+    local playerIdx = GetPlayerFromServerId(sourcePlayer)
+    if not playerIdx or playerIdx == -1 then return end
     
     -- Get the ped of the source player
-    local targetPed = GetPlayerPed(GetPlayerFromServerId(sourcePlayer))
+    local targetPed = GetPlayerPed(playerIdx)
     
     if targetPed and DoesEntityExist(targetPed) then
         -- The native TaskRappelFromHeli already syncs visually

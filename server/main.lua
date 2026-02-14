@@ -336,6 +336,7 @@ RegisterNetEvent('polcam:cameraStateSync')
 AddEventHandler('polcam:cameraStateSync', function(vehicleNetId, state)
     local src = source
     if not vehicleNetId then return end
+    if type(state) ~= 'table' then return end
     
     -- Only accept updates from the current camera owner
     if ActiveHeliCameras[vehicleNetId] ~= src then return end
@@ -675,6 +676,60 @@ local function GetMaxTrackingDistanceForType(targetType)
     return 1000.0
 end
 
+local function ValidateTrackingTargetRequest(src, targetNetId, targetType)
+    if type(targetNetId) ~= 'number' or targetNetId <= 0 then
+        return nil
+    end
+
+    if targetType ~= 'vehicle' and targetType ~= 'ped' then
+        return nil
+    end
+
+    local ped = GetPlayerPed(src)
+    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
+    if not vehicle or vehicle == 0 then
+        return nil
+    end
+
+    if not IsAllowedHelicopterEntity(vehicle) then
+        return nil
+    end
+
+    if not IsAllowedSeatForPed(ped, vehicle) then
+        return nil
+    end
+
+    local vehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    if not vehicleNetId then
+        return nil
+    end
+
+    local targetEntity = NetworkGetEntityFromNetworkId(targetNetId)
+    if not targetEntity or targetEntity == 0 or not DoesEntityExist(targetEntity) then
+        return nil
+    end
+
+    if targetType == 'vehicle' and not IsEntityAVehicle(targetEntity) then
+        return nil
+    end
+
+    if targetType == 'ped' and not IsEntityAPed(targetEntity) then
+        return nil
+    end
+
+    local heliCoords = GetEntityCoords(vehicle)
+    local targetCoords = GetEntityCoords(targetEntity)
+    local dx = heliCoords.x - targetCoords.x
+    local dy = heliCoords.y - targetCoords.y
+    local dz = heliCoords.z - targetCoords.z
+    local maxDist = GetMaxTrackingDistanceForType(targetType)
+    if (dx * dx + dy * dy + dz * dz) > (maxDist * maxDist) then
+        return nil
+    end
+
+    return vehicleNetId
+end
+
 local function SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
     if not vehicleNetId then return end
 
@@ -706,53 +761,8 @@ AddEventHandler('polcam:trackingRequestStart', function(targetNetId, targetType)
         return
     end
 
-    if type(targetNetId) ~= 'number' or targetNetId <= 0 then
-        return
-    end
-
-    if targetType ~= 'vehicle' and targetType ~= 'ped' then
-        return
-    end
-
-    local ped = GetPlayerPed(src)
-    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
-    if not vehicle or vehicle == 0 then
-        return
-    end
-
-    if not IsAllowedHelicopterEntity(vehicle) then
-        return
-    end
-
-    if not IsAllowedSeatForPed(ped, vehicle) then
-        return
-    end
-
-    local vehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local vehicleNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
     if not vehicleNetId then
-        return
-    end
-
-    local targetEntity = NetworkGetEntityFromNetworkId(targetNetId)
-    if not targetEntity or targetEntity == 0 or not DoesEntityExist(targetEntity) then
-        return
-    end
-
-    if targetType == 'vehicle' and not IsEntityAVehicle(targetEntity) then
-        return
-    end
-
-    if targetType == 'ped' and not IsEntityAPed(targetEntity) then
-        return
-    end
-
-    local heliCoords = GetEntityCoords(vehicle)
-    local targetCoords = GetEntityCoords(targetEntity)
-    local dx = heliCoords.x - targetCoords.x
-    local dy = heliCoords.y - targetCoords.y
-    local dz = heliCoords.z - targetCoords.z
-    local maxDist = GetMaxTrackingDistanceForType(targetType)
-    if (dx * dx + dy * dy + dz * dz) > (maxDist * maxDist) then
         return
     end
 
@@ -792,6 +802,7 @@ end)
 RegisterNetEvent('polcam:trackingSync')
 AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
     local src = source
+    local now = GetGameTimer()
     
     local ped = GetPlayerPed(src)
     local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
@@ -804,15 +815,26 @@ AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
         return
     end
 
-    
     if active then
-        -- Setting or updating tracking
-        if type(targetNetId) ~= 'number' or targetNetId <= 0 then
+        if not RateLimitTracking(src, 'start', now) then
             return
         end
-        SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
+
+        local validatedVehicleNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
+        if not validatedVehicleNetId then
+            return
+        end
+
+        SetHeliTracking(validatedVehicleNetId, src, targetNetId, targetType)
     else
-        -- Clearing tracking
+        if not RateLimitTracking(src, 'stop', now) then
+            return
+        end
+
+        if not IsAllowedHelicopterEntity(vehicle) or not IsAllowedSeatForPed(ped, vehicle) then
+            return
+        end
+
         ClearHeliTracking(vehicleNetId)
     end
 end)

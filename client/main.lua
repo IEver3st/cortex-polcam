@@ -344,6 +344,230 @@ PolCam = {
     }
 }
 
+local PolCamSettingsKeys = {
+    HighContrastEnabled = 'polcam_highContrastEnabled',
+    HighContrastTheme = 'polcam_highContrastTheme',
+    TargetLabelFollowTheme = 'polcam_targetLabelFollowTheme',
+    TargetLabelColor = 'polcam_targetLabelColor',
+}
+
+local PolCamThemeOptions = {
+    { value = 'green', label = 'Green' },
+    { value = 'orange', label = 'Orange' },
+    { value = 'red', label = 'Red' },
+    { value = 'purple', label = 'Purple' },
+    { value = 'blue', label = 'Blue' },
+    { value = 'pink', label = 'Pink' },
+    { value = 'black', label = 'Black' },
+    { value = '#ffffff', label = 'White' },
+    { value = '#38bdf8', label = 'Cyan' },
+    { value = '#f59e0b', label = 'Amber' },
+}
+
+local PolCamThemeAllowList = {
+    green = true,
+    orange = true,
+    red = true,
+    purple = true,
+    blue = true,
+    pink = true,
+    black = true,
+}
+
+local PolCamLabelColorOptions = {
+    { value = '#00ff00', label = 'Green' },
+    { value = '#ffffff', label = 'White' },
+    { value = '#38bdf8', label = 'Cyan' },
+    { value = '#5eb2ff', label = 'Blue' },
+    { value = '#f59e0b', label = 'Amber' },
+    { value = '#ef4444', label = 'Red' },
+    { value = '#bf00ff', label = 'Purple' },
+    { value = '#ff00ff', label = 'Pink' },
+}
+
+local function IsHexColor(value)
+    return type(value) == 'string' and value:match('^#%x%x%x%x%x%x$') ~= nil
+end
+
+local function HexToRgba(value, alpha)
+    if not IsHexColor(value) then return nil end
+    local r = tonumber(value:sub(2, 3), 16)
+    local g = tonumber(value:sub(4, 5), 16)
+    local b = tonumber(value:sub(6, 7), 16)
+    if not r or not g or not b then return nil end
+    return { r, g, b, alpha or 230 }
+end
+
+local function RgbaToHex(value)
+    if type(value) ~= 'table' then return '#00ff00' end
+    local r = max(0, min(255, floor(tonumber(value[1]) or 0)))
+    local g = max(0, min(255, floor(tonumber(value[2]) or 255)))
+    local b = max(0, min(255, floor(tonumber(value[3]) or 0)))
+    return format('#%02x%02x%02x', r, g, b)
+end
+
+local function BuildPolCamTrackColorsPayload()
+    local targetCfg = (Config.UI and Config.UI.TargetLabel) or {}
+    if targetCfg.FollowHighContrast ~= false then
+        return { FollowTheme = true }
+    end
+
+    local color = targetCfg.Color or { 0, 255, 0, 230 }
+    local r = max(0, min(255, floor(tonumber(color[1]) or 0)))
+    local g = max(0, min(255, floor(tonumber(color[2]) or 255)))
+    local b = max(0, min(255, floor(tonumber(color[3]) or 0)))
+
+    return {
+        FollowTheme = false,
+        Color = format('rgb(%d, %d, %d)', r, g, b),
+        DimColor = format('rgba(%d, %d, %d, 0.85)', r, g, b),
+    }
+end
+
+local function BuildPolCamHighContrastPayload()
+    local highContrastCfg = (Config.UI and Config.UI.HighContrast) or {}
+    return {
+        enabled = highContrastCfg.Enabled == true,
+        theme = highContrastCfg.Theme or 'green'
+    }
+end
+
+local function CanUseEsLibSettings()
+    return GetResourceState('es_lib') == 'started'
+        and type(exports) == 'table'
+        and exports.es_lib
+        and exports.es_lib.registerSettingsScript
+        and exports.es_lib.getSetting
+        and exports.es_lib.onSettingChange
+end
+
+function getSettingsDefinition()
+    local targetCfg = (Config.UI and Config.UI.TargetLabel) or {}
+    local highContrastCfg = (Config.UI and Config.UI.HighContrast) or {}
+
+    return {
+        label = 'PolCam',
+        settings = {
+            {
+                key = PolCamSettingsKeys.HighContrastEnabled,
+                type = 'toggle',
+                label = 'High Contrast',
+                description = 'Enable high contrast color mode for PolCam HUD',
+                default = highContrastCfg.Enabled == true,
+            },
+            {
+                key = PolCamSettingsKeys.HighContrastTheme,
+                type = 'select',
+                label = 'HUD Color Theme',
+                description = 'Personal PolCam HUD color theme',
+                default = highContrastCfg.Theme or 'green',
+                options = PolCamThemeOptions,
+            },
+            {
+                key = PolCamSettingsKeys.TargetLabelFollowTheme,
+                type = 'toggle',
+                label = 'Track Label Follows Theme',
+                description = 'Use HUD theme color for world track labels',
+                default = targetCfg.FollowHighContrast ~= false,
+            },
+            {
+                key = PolCamSettingsKeys.TargetLabelColor,
+                type = 'select',
+                label = 'Track Label Color',
+                description = 'Track label color when follow-theme is disabled',
+                default = RgbaToHex(targetCfg.Color),
+                options = PolCamLabelColorOptions,
+            },
+        },
+        sections = {
+            {
+                label = 'Visuals',
+                keys = {
+                    PolCamSettingsKeys.HighContrastEnabled,
+                    PolCamSettingsKeys.HighContrastTheme,
+                    PolCamSettingsKeys.TargetLabelFollowTheme,
+                    PolCamSettingsKeys.TargetLabelColor,
+                }
+            },
+        },
+    }
+end
+
+local function ApplyPolCamClientSettingsFromEsLib()
+    if not CanUseEsLibSettings() then return end
+
+    local highContrastCfg = (Config.UI and Config.UI.HighContrast) or {}
+    local targetCfg = (Config.UI and Config.UI.TargetLabel) or {}
+
+    local highContrastEnabled = exports.es_lib:getSetting(PolCamSettingsKeys.HighContrastEnabled)
+    if type(highContrastEnabled) ~= 'boolean' then
+        highContrastEnabled = highContrastCfg.Enabled == true
+    end
+
+    local highContrastTheme = exports.es_lib:getSetting(PolCamSettingsKeys.HighContrastTheme)
+    if type(highContrastTheme) ~= 'string' then
+        highContrastTheme = highContrastCfg.Theme or 'green'
+    end
+    local normalizedTheme = string.lower(highContrastTheme)
+    if not PolCamThemeAllowList[normalizedTheme] and not IsHexColor(highContrastTheme) then
+        highContrastTheme = highContrastCfg.Theme or 'green'
+    end
+
+    local followTheme = exports.es_lib:getSetting(PolCamSettingsKeys.TargetLabelFollowTheme)
+    if type(followTheme) ~= 'boolean' then
+        followTheme = targetCfg.FollowHighContrast ~= false
+    end
+
+    local targetLabelColor = exports.es_lib:getSetting(PolCamSettingsKeys.TargetLabelColor)
+    if type(targetLabelColor) ~= 'string' or not IsHexColor(targetLabelColor) then
+        targetLabelColor = RgbaToHex(targetCfg.Color)
+    end
+
+    Config.UI = Config.UI or {}
+    Config.UI.HighContrast = Config.UI.HighContrast or {}
+    Config.UI.TargetLabel = Config.UI.TargetLabel or {}
+
+    Config.UI.HighContrast.Enabled = highContrastEnabled == true
+    Config.UI.HighContrast.Theme = highContrastTheme
+    Config.UI.TargetLabel.FollowHighContrast = followTheme == true
+
+    local rgba = HexToRgba(targetLabelColor, 230)
+    if rgba then
+        Config.UI.TargetLabel.Color = rgba
+    end
+end
+
+local function PushPolCamClientSettingsToNui()
+    SendNUIMessage({
+        action = 'applyClientSettings',
+        data = {
+            highContrast = BuildPolCamHighContrastPayload(),
+            trackColors = BuildPolCamTrackColorsPayload()
+        }
+    })
+end
+
+local function RegisterPolCamSettingsIntegration()
+    if not CanUseEsLibSettings() then return end
+
+    exports.es_lib:registerSettingsScript('polcam', getSettingsDefinition())
+    ApplyPolCamClientSettingsFromEsLib()
+
+    local keys = {
+        PolCamSettingsKeys.HighContrastEnabled,
+        PolCamSettingsKeys.HighContrastTheme,
+        PolCamSettingsKeys.TargetLabelFollowTheme,
+        PolCamSettingsKeys.TargetLabelColor,
+    }
+
+    for _, key in ipairs(keys) do
+        exports.es_lib:onSettingChange(key, function()
+            ApplyPolCamClientSettingsFromEsLib()
+            PushPolCamClientSettingsToNui()
+        end)
+    end
+end
+
 -- ============================================================================
 -- KEY BINDINGS
 -- ============================================================================
@@ -701,6 +925,7 @@ AddEventHandler('polcam:cameraClaimResult', function(allowed, ownerServerId)
                 TriggerServerEvent('polcam:requestCameraState', vehicleNetId)
                 -- Also request tracking state for full sync.
                 TriggerServerEvent('polcam:trackingRequestState', vehicleNetId)
+                TriggerServerEvent('polcam:requestSyncedMarkers', vehicleNetId)
                 -- The activation will happen in the receiveCameraState handler
             else
                 ActivatePolCam(true, nil)
@@ -743,6 +968,7 @@ AddEventHandler('polcam:receiveCameraState', function(vehicleNetId, state)
     -- Ensure we also pull the latest tracking state for this heli.
     if vehicleNetId then
         TriggerServerEvent('polcam:trackingRequestState', vehicleNetId)
+        TriggerServerEvent('polcam:requestSyncedMarkers', vehicleNetId)
     end
 
     ActivatePolCam(true, state)
@@ -988,10 +1214,8 @@ function ActivatePolCam(hasClaim, sharedState)
     SendNUIMessage({
         action = "show",
         visionMode = PolCam.VisionMode,
-        highContrast = {
-            enabled = Config.UI.HighContrast.Enabled or false,
-            theme = Config.UI.HighContrast.Theme or "green"
-        }
+        highContrast = BuildPolCamHighContrastPayload(),
+        trackColors = BuildPolCamTrackColorsPayload()
     })
     SetNuiFocus(false, false)
     
@@ -1656,10 +1880,8 @@ function UpdatePilotHUD()
             hoverAltitude = hoverAltitude,
 
             -- Ensure NUI can apply correct theme even if camera UI never opened.
-            highContrast = {
-                enabled = Config.UI.HighContrast.Enabled or false,
-                theme = Config.UI.HighContrast.Theme or "green"
-            }
+            highContrast = BuildPolCamHighContrastPayload(),
+            trackColors = BuildPolCamTrackColorsPayload()
         }
     })
 end
@@ -1718,6 +1940,57 @@ end
 -- ============================================================================
 -- EXPORTS
 -- ============================================================================
+function ConvertSpeed(speedMps, unit)
+    if type(speedMps) ~= 'number' then return 0.0 end
+
+    local targetUnit = type(unit) == 'string' and string.lower(unit) or 'mph'
+
+    if targetUnit == 'kmh' or targetUnit == 'kph' then
+        return speedMps * 3.6
+    end
+
+    if targetUnit == 'knots' or targetUnit == 'kts' then
+        return speedMps * 1.943844
+    end
+
+    return speedMps * 2.236936
+end
+
+function ConvertAltitude(altitudeMeters, unit)
+    if type(altitudeMeters) ~= 'number' then return 0.0 end
+
+    local targetUnit = type(unit) == 'string' and string.lower(unit) or 'ft'
+    if targetUnit == 'm' or targetUnit == 'meters' then
+        return altitudeMeters
+    end
+
+    return altitudeMeters * 3.28084
+end
+
+function ConvertDistance(distanceMeters, unit)
+    if type(distanceMeters) ~= 'number' then return 0.0 end
+
+    local targetUnit = type(unit) == 'string' and string.lower(unit) or 'm'
+
+    if targetUnit == 'ft' or targetUnit == 'feet' then
+        return distanceMeters * 3.28084
+    end
+
+    if targetUnit == 'km' or targetUnit == 'kilometers' then
+        return distanceMeters / 1000.0
+    end
+
+    if targetUnit == 'mi' or targetUnit == 'miles' then
+        return distanceMeters / 1609.344
+    end
+
+    return distanceMeters
+end
+
+exports('ConvertSpeed', ConvertSpeed)
+exports('ConvertAltitude', ConvertAltitude)
+exports('ConvertDistance', ConvertDistance)
+
 exports('IsPolCamActive', function()
     return PolCam.Active
 end)
@@ -1797,6 +2070,8 @@ end)
 -- INITIALIZATION
 -- ============================================================================
 CreateThread(function()
+    RegisterPolCamSettingsIntegration()
+
     -- Register keybinds
     RegisterKeybinds()
     
@@ -1808,6 +2083,13 @@ CreateThread(function()
     if Config.Debug.Enabled then
         print("[PolCam] Initialized successfully")
     end
+end)
+
+AddEventHandler('onClientResourceStart', function(resourceName)
+    if resourceName ~= 'es_lib' then return end
+    RegisterPolCamSettingsIntegration()
+    ApplyPolCamClientSettingsFromEsLib()
+    PushPolCamClientSettingsToNui()
 end)
 
 -- ============================================================================

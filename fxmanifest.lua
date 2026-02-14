@@ -18,24 +18,13 @@ client_scripts {
     'client/camera.lua',
     'client/vision.lua',
     'client/targeting.lua',
-    -- Debug tools are conditionally loaded at runtime
-    -- (no debug features are loaded when Config.Debug.ToolsEnabled is false)
+    'client/debug.lua',
     'client/poi.lua',
     'client/spotlight.lua',
     'client/helicontrol.lua',
     'client/streetoverlay.lua',
     'client/rappel.lua',
     'client/main.lua'
-}
-
--- Conditionally load debug menu utilities
-client_script {
-    'client/debug.lua',
-    enabled = function()
-        return Config
-            and Config.Debug
-            and Config.Debug.ToolsEnabled == true
-    end
 }
 
 -- Server scripts
