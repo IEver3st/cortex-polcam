@@ -9,7 +9,7 @@ A FLIR-style police helicopter camera system for FiveM with target tracking, spo
 
 | Resource | Required | Notes |
 |----------|----------|-------|
-| **es_lib** | **Yes** | Required for notifications, progress bars, and debug tools. Must be started before polcam. |
+| **es_lib** | **Yes** | Required for notifications, radial progress, and debug tools. Must be started before polcam. |
 | **es_hud** | Optional | Auto-detected. Hides the player HUD while the camera is active and optionally forces the aircraft HUD for the pilot. |
 | **nearest-postal** | Optional | Provides postal code data for the camera overlay. |
 
@@ -32,7 +32,7 @@ Config.EsHud = {
 
 ## es_lib Integration
 
-es_lib is used for notifications, the target lock progress bar, and debug tooling.
+es_lib is used for notifications, the target lock radial progress, and debug tooling.
 
 ```lua
 Config.Lib = {
@@ -65,7 +65,7 @@ All settings are in `config.lua`.
 ```lua
 Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }    -- Seats that can activate the camera (-1 = driver)
-Config.InstantLock = false                 -- false = uses es_lib progress bar for lock acquisition
+Config.InstantLock = false                 -- false = uses es_lib radial progress for lock acquisition
 ```
 
 ### Keybinds

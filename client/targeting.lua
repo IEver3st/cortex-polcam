@@ -1177,7 +1177,7 @@ function StartLocking()
         return
     end
     
-    -- Non-instant mode - use es_lib progress bar
+    -- Non-instant mode - use es_lib radial progress
     if not IsEsLibAvailable() then
         -- Fallback to instant lock if es_lib not available
         CompleteLock(targetEntity, targetType)
@@ -1189,13 +1189,13 @@ function StartLocking()
     -- Get the lock duration from config (default 2000ms)
     local lockDuration = (Config.Tracking and Config.Tracking.LockDurationMs) or 2000
     
-    -- Run the progress bar in a thread to avoid blocking
+    -- Run the progress UI in a thread to avoid blocking
     CreateThread(function()
         local completed = exports.es_lib:progress({
             duration = lockDuration,
             label = "ACQUIRING TARGET",
             position = "bottom",
-            style = "bar",
+            style = "circle",
             canCancel = true,
             useWhileDead = false,
             disable = {
