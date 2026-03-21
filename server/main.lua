@@ -8,16 +8,29 @@
 -- ============================================================================
 local GetPlayerPed = GetPlayerPed
 local GetVehiclePedIsIn = GetVehiclePedIsIn
+local GetPedInVehicleSeat = GetPedInVehicleSeat
 local DoesEntityExist = DoesEntityExist
 local NetworkGetNetworkIdFromEntity = NetworkGetNetworkIdFromEntity
+local NetworkGetEntityFromNetworkId = NetworkGetEntityFromNetworkId
 local GetGameTimer = GetGameTimer
 local GetCurrentResourceName = GetCurrentResourceName
+local GetEntityCoords = GetEntityCoords
+local GetEntityHeading = GetEntityHeading
+local GetEntityType = GetEntityType
+local GetEntityModel = GetEntityModel
+local GetVehicleNumberPlateText = GetVehicleNumberPlateText
+local GetPlayerName = GetPlayerName
 local TriggerClientEvent = TriggerClientEvent
 local CreateThread = CreateThread
 local Wait = Wait
 local os_time = os.time
 local math_sqrt = math.sqrt
 local pairs = pairs
+local ipairs = ipairs
+local tonumber = tonumber
+local tostring = tostring
+local type = type
+local table_sort = table.sort
 
 -- ============================================================================
 -- POI STORAGE
@@ -45,6 +58,316 @@ local SharedCameraState = {} -- vehicleNetId -> {heading, pitch, zoom, targetZoo
 -- exits the camera another operator can take over the same instance.
 local ActiveSpotlights = {} -- vehicleNetId -> {active, radius, color, owner, heliCoords, groundCoords, targetNetId, trackingTarget}
 local HeliTracking = {} -- vehicleNetId -> {active, targetNetId, targetType, ownerSrc, seq}
+local ActiveAirFeeds = {} -- vehicleNetId -> feed state
+
+local AIR_FEED_STALE_MS = 1200
+local AIR_FEED_MAINTENANCE_INTERVAL_MS = 250
+local AIR_FEED_ID_PREFIX = 'air:'
+
+local function TrimString(value, fallback)
+    if value == nil then
+        return fallback
+    end
+
+    local text = tostring(value):gsub('^%s+', ''):gsub('%s+$', '')
+    if text == '' then
+        return fallback
+    end
+
+    return text
+end
+
+local function CloneVec3(value)
+    if type(value) ~= 'table' and type(value) ~= 'vector3' then
+        return nil
+    end
+
+    local x = tonumber(value.x or value[1])
+    local y = tonumber(value.y or value[2])
+    local z = tonumber(value.z or value[3])
+    if not x or not y or not z then
+        return nil
+    end
+
+    return { x = x + 0.0, y = y + 0.0, z = z + 0.0 }
+end
+
+local function CloneRotation(value)
+    if type(value) ~= 'table' then
+        return nil
+    end
+
+    local x = tonumber(value.x or value[1])
+    local y = tonumber(value.y or value[2])
+    local z = tonumber(value.z or value[3])
+    if not x or not y or not z then
+        return nil
+    end
+
+    return { x = x + 0.0, y = y + 0.0, z = z + 0.0 }
+end
+
+local function BuildFeedId(vehicleNetId)
+    return AIR_FEED_ID_PREFIX .. tostring(vehicleNetId)
+end
+
+local function IsServerVehicleEntity(entity)
+    return entity and entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2
+end
+
+local function IsServerPedEntity(entity)
+    return entity and entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 1
+end
+
+local function ParseFeedId(feedId)
+    if type(feedId) == 'number' then
+        return math.floor(feedId)
+    end
+
+    if type(feedId) ~= 'string' then
+        return nil
+    end
+
+    local suffix = feedId:match('^' .. AIR_FEED_ID_PREFIX .. '(%d+)$')
+    if not suffix then
+        return nil
+    end
+
+    return tonumber(suffix)
+end
+
+local function ResolveAirFeedCallsign(src)
+    if not src or src <= 0 then
+        return 'AIR'
+    end
+
+    local fallback = ('AIR-%02d'):format(src)
+    local stateOwner
+    local ok = pcall(function()
+        stateOwner = Player(src)
+    end)
+    if ok and stateOwner and stateOwner.state then
+        local callsign = TrimString(stateOwner.state.callsign, nil)
+            or TrimString(stateOwner.state.callSign, nil)
+            or TrimString(stateOwner.state.radioCallsign, nil)
+        if callsign then
+            return callsign
+        end
+
+        local mdt = stateOwner.state.mdt
+        if type(mdt) == 'table' then
+            callsign = TrimString(mdt.callsign or mdt.callSign, nil)
+            if callsign then
+                return callsign
+            end
+        end
+    end
+
+    return fallback
+end
+
+local function ResolvePilotSource(vehicle)
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        return nil
+    end
+
+    local ped = GetPedInVehicleSeat(vehicle, -1)
+    if not ped or ped == 0 then
+        return nil
+    end
+
+    local players = GetPlayers()
+    for _, playerId in ipairs(players) do
+        local src = tonumber(playerId)
+        if src and src > 0 and GetPlayerPed(src) == ped then
+            return src
+        end
+    end
+
+    return nil
+end
+
+local function BuildAirFeedPreview(feed)
+    local preview = type(feed.preview) == 'table' and feed.preview or {}
+    return {
+        coords = CloneVec3(preview.coords),
+        rotation = CloneRotation(preview.rotation),
+        fov = tonumber(preview.fov) or 0.0,
+        visionMode = TrimString(preview.visionMode, 'normal'),
+        status = TrimString(preview.status, 'Online'),
+    }
+end
+
+local function BuildAirFeedTracking(feed)
+    local tracking = type(feed.tracking) == 'table' and feed.tracking or {}
+    return {
+        active = tracking.active == true,
+        targetNetId = tonumber(tracking.targetNetId),
+        targetType = tracking.targetType,
+        targetCoords = CloneVec3(tracking.targetCoords),
+        heading = tonumber(tracking.heading),
+        plate = TrimString(tracking.plate, nil),
+        vehicleLabel = TrimString(tracking.vehicleLabel, nil),
+    }
+end
+
+local function BuildAirFeedPublic(feed)
+    if type(feed) ~= 'table' then
+        return nil
+    end
+
+    return {
+        feedId = feed.feedId,
+        heliNetId = tonumber(feed.heliNetId),
+        label = TrimString(feed.label, 'AIR SUPPORT'),
+        callsign = TrimString(feed.callsign, 'AIR'),
+        pilotSource = tonumber(feed.pilotSource),
+        operatorSource = tonumber(feed.operatorSource),
+        cameraActive = feed.cameraActive == true,
+        preview = BuildAirFeedPreview(feed),
+        tracking = BuildAirFeedTracking(feed),
+        lastSeenAt = tonumber(feed.lastSeenAt) or 0,
+    }
+end
+
+local function UpsertAirFeed(vehicleNetId, payload)
+    local feed = ActiveAirFeeds[vehicleNetId] or {
+        feedId = BuildFeedId(vehicleNetId),
+        heliNetId = vehicleNetId,
+    }
+
+    feed.feedId = BuildFeedId(vehicleNetId)
+    feed.heliNetId = vehicleNetId
+    feed.operatorSource = tonumber(payload.operatorSource) or nil
+    feed.label = TrimString(payload.label, feed.label or ('AIR-%s'):format(tostring(vehicleNetId)))
+    feed.callsign = ResolveAirFeedCallsign(feed.operatorSource)
+    feed.cameraActive = true
+    feed.lastSeenAt = GetGameTimer()
+    feed.preview = {
+        coords = CloneVec3(payload.camCoords),
+        rotation = CloneRotation(payload.camRot),
+        fov = tonumber(payload.fov) or 0.0,
+        visionMode = TrimString(payload.visionMode, 'normal'),
+        status = 'Online',
+    }
+    feed.tracking = feed.tracking or {}
+
+    ActiveAirFeeds[vehicleNetId] = feed
+    return feed
+end
+
+local function RefreshAirFeedTracking(vehicleNetId, feed)
+    if not vehicleNetId or type(feed) ~= 'table' then
+        return
+    end
+
+    local trackingState = HeliTracking[vehicleNetId]
+    local tracking = {
+        active = false,
+        targetNetId = nil,
+        targetType = nil,
+        targetCoords = nil,
+        heading = nil,
+        plate = nil,
+        vehicleLabel = nil,
+    }
+
+    if trackingState and trackingState.active == true then
+        tracking.active = true
+        tracking.targetNetId = tonumber(trackingState.targetNetId)
+        tracking.targetType = trackingState.targetType
+
+        local targetEntity = tracking.targetNetId and NetworkGetEntityFromNetworkId(tracking.targetNetId) or 0
+        if targetEntity and targetEntity ~= 0 and DoesEntityExist(targetEntity) then
+            tracking.targetCoords = CloneVec3(GetEntityCoords(targetEntity))
+            tracking.heading = tonumber(GetEntityHeading(targetEntity)) or 0.0
+
+            if tracking.targetType == 'vehicle' then
+                tracking.plate = TrimString(GetVehicleNumberPlateText(targetEntity), nil)
+                tracking.vehicleLabel = tracking.plate or ('Vehicle %s'):format(tostring(tracking.targetNetId))
+            else
+                tracking.vehicleLabel = ('Ped %s'):format(tostring(tracking.targetNetId))
+            end
+        else
+            tracking.active = false
+        end
+    end
+
+    feed.tracking = tracking
+end
+
+local function RemoveAirFeed(vehicleNetId)
+    ActiveAirFeeds[vehicleNetId] = nil
+end
+
+local function GetActiveAirFeeds()
+    local feeds = {}
+    for _, feed in pairs(ActiveAirFeeds) do
+        if type(feed) == 'table' and feed.cameraActive == true then
+            feeds[#feeds + 1] = BuildAirFeedPublic(feed)
+        end
+    end
+
+    table_sort(feeds, function(a, b)
+        local left = tonumber(a and a.lastSeenAt) or 0
+        local right = tonumber(b and b.lastSeenAt) or 0
+        if left == right then
+            return (tonumber(a and a.heliNetId) or 0) < (tonumber(b and b.heliNetId) or 0)
+        end
+        return left > right
+    end)
+
+    return feeds
+end
+
+local function GetAirFeedById(feedId)
+    local vehicleNetId = ParseFeedId(feedId)
+    if not vehicleNetId then
+        return nil
+    end
+
+    return BuildAirFeedPublic(ActiveAirFeeds[vehicleNetId])
+end
+
+local function GetTrackedDatalinkTargets()
+    local targets = {}
+
+    for _, feed in pairs(ActiveAirFeeds) do
+        local publicFeed = BuildAirFeedPublic(feed)
+        local tracking = publicFeed and publicFeed.tracking
+        if publicFeed
+            and tracking
+            and tracking.active == true
+            and tracking.targetType == 'vehicle'
+            and type(tracking.targetCoords) == 'table' then
+            targets[#targets + 1] = {
+                feedId = publicFeed.feedId,
+                heliNetId = publicFeed.heliNetId,
+                heliLabel = publicFeed.label,
+                coords = tracking.targetCoords,
+                heading = tracking.heading,
+                plate = tracking.plate,
+                vehicleLabel = tracking.vehicleLabel,
+                updatedAt = publicFeed.lastSeenAt,
+            }
+        end
+    end
+
+    table_sort(targets, function(a, b)
+        local left = tonumber(a and a.updatedAt) or 0
+        local right = tonumber(b and b.updatedAt) or 0
+        if left == right then
+            return (tostring(a and a.feedId or '')) < (tostring(b and b.feedId or ''))
+        end
+        return left > right
+    end)
+
+    return targets
+end
+
+exports('GetActiveAirFeeds', GetActiveAirFeeds)
+exports('GetAirFeedById', GetAirFeedById)
+exports('GetTrackedDatalinkTargets', GetTrackedDatalinkTargets)
 
 -- Rate limiting to prevent "Reliable network event overflow"
 local LastSpotlightBroadcastAt = {} -- vehicleNetId -> ms
@@ -324,6 +647,12 @@ AddEventHandler('playerDropped', function()
     for vehNetId, waitlist in pairs(CameraWaitlists) do
         if waitlist and waitlist[src] then
             waitlist[src] = nil
+        end
+    end
+
+    for vehNetId, feed in pairs(ActiveAirFeeds) do
+        if type(feed) == 'table' and tonumber(feed.operatorSource) == src then
+            RemoveAirFeed(vehNetId)
         end
     end
 end)
@@ -661,6 +990,83 @@ local function IsAllowedSeatForPed(ped, vehicle)
     return false
 end
 
+RegisterNetEvent('polcam:feedHeartbeat')
+AddEventHandler('polcam:feedHeartbeat', function(payload)
+    local src = source
+    if type(payload) ~= 'table' then
+        return
+    end
+
+    local vehicleNetId = tonumber(payload.heliNetId)
+    if not vehicleNetId or vehicleNetId <= 0 then
+        return
+    end
+
+    local operatorSource = tonumber(payload.operatorSource)
+    if operatorSource ~= src then
+        return
+    end
+
+    local ped = GetPlayerPed(src)
+    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        return
+    end
+
+    if not IsAllowedHelicopterEntity(vehicle) or not IsAllowedSeatForPed(ped, vehicle) then
+        return
+    end
+
+    local currentVehicleNetId = NetworkGetNetworkIdFromEntity(vehicle)
+    if currentVehicleNetId ~= vehicleNetId then
+        return
+    end
+
+    if ActiveHeliCameras[vehicleNetId] ~= src then
+        return
+    end
+
+    local coords = CloneVec3(payload.camCoords)
+    local rotation = CloneRotation(payload.camRot)
+    if not coords or not rotation then
+        return
+    end
+
+    local feed = UpsertAirFeed(vehicleNetId, payload)
+    feed.pilotSource = ResolvePilotSource(vehicle)
+    feed.callsign = ResolveAirFeedCallsign(src)
+    RefreshAirFeedTracking(vehicleNetId, feed)
+end)
+
+local function MaintainAirFeeds()
+    local now = GetGameTimer()
+
+    for vehicleNetId, feed in pairs(ActiveAirFeeds) do
+        if type(feed) ~= 'table' then
+            ActiveAirFeeds[vehicleNetId] = nil
+        else
+            local age = now - (tonumber(feed.lastSeenAt) or 0)
+            if age > AIR_FEED_STALE_MS then
+                RemoveAirFeed(vehicleNetId)
+            else
+                local ownerSrc = tonumber(feed.operatorSource) or 0
+                local ownerPed = ownerSrc > 0 and GetPlayerPed(ownerSrc) or 0
+                local ownerVehicle = ownerPed and ownerPed ~= 0 and GetVehiclePedIsIn(ownerPed, false) or 0
+                local ownerVehicleNetId = ownerVehicle ~= 0 and DoesEntityExist(ownerVehicle) and NetworkGetNetworkIdFromEntity(ownerVehicle) or nil
+
+                if ActiveHeliCameras[vehicleNetId] ~= ownerSrc or ownerVehicleNetId ~= vehicleNetId then
+                    RemoveAirFeed(vehicleNetId)
+                else
+                    feed.cameraActive = true
+                    feed.pilotSource = ResolvePilotSource(ownerVehicle)
+                    feed.callsign = ResolveAirFeedCallsign(ownerSrc)
+                    RefreshAirFeedTracking(vehicleNetId, feed)
+                end
+            end
+        end
+    end
+end
+
 local function GetMaxTrackingDistanceForType(targetType)
     local tracking = Config and Config.Tracking
     if type(tracking) ~= 'table' then return 1000.0 end
@@ -709,11 +1115,11 @@ local function ValidateTrackingTargetRequest(src, targetNetId, targetType)
         return nil
     end
 
-    if targetType == 'vehicle' and not IsEntityAVehicle(targetEntity) then
+    if targetType == 'vehicle' and not IsServerVehicleEntity(targetEntity) then
         return nil
     end
 
-    if targetType == 'ped' and not IsEntityAPed(targetEntity) then
+    if targetType == 'ped' and not IsServerPedEntity(targetEntity) then
         return nil
     end
 
@@ -1012,6 +1418,16 @@ AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
     end
     
     TriggerClientEvent('polcam:syncAllMarkers', source, vehicleMarkers)
+end)
+
+-- ============================================================================
+-- AIR FEED MAINTENANCE
+-- ============================================================================
+CreateThread(function()
+    while true do
+        MaintainAirFeeds()
+        Wait(AIR_FEED_MAINTENANCE_INTERVAL_MS)
+    end
 end)
 
 -- ============================================================================

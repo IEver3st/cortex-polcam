@@ -53,3 +53,9 @@ exports {
     'ConvertAltitude',
     'ConvertDistance'
 }
+
+server_exports {
+    'GetActiveAirFeeds',
+    'GetAirFeedById',
+    'GetTrackedDatalinkTargets'
+}

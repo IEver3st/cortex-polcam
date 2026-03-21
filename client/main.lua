@@ -2039,29 +2039,162 @@ AddEventHandler('polcam:forceReleaseAll', function()
 end)
 
 -- ============================================================================
--- ECOSYSTEM INTEGRATION (PolFeeds)
+-- AIR FEED HEARTBEAT
 -- ============================================================================
+local AIR_FEED_HEARTBEAT_INTERVAL_MS = 200
+local AIR_FEED_HEARTBEAT_FORCE_MS = 500
+local lastAirFeedHeartbeatAt = 0
+local lastAirFeedHeartbeatState = nil
+
+local function CoordsDiffer(a, b, epsilon)
+    if type(a) ~= 'vector3' and type(a) ~= 'table' then return true end
+    if type(b) ~= 'vector3' and type(b) ~= 'table' then return true end
+
+    local ax = tonumber(a.x or a[1])
+    local ay = tonumber(a.y or a[2])
+    local az = tonumber(a.z or a[3])
+    local bx = tonumber(b.x or b[1])
+    local by = tonumber(b.y or b[2])
+    local bz = tonumber(b.z or b[3])
+    if not ax or not ay or not az or not bx or not by or not bz then
+        return true
+    end
+
+    local delta = tonumber(epsilon) or 0.05
+    return abs(ax - bx) > delta or abs(ay - by) > delta or abs(az - bz) > delta
+end
+
+local function RotationDiffer(a, b, epsilon)
+    if type(a) ~= 'table' or type(b) ~= 'table' then
+        return true
+    end
+
+    local delta = tonumber(epsilon) or 0.05
+    return abs((tonumber(a.x) or 0.0) - (tonumber(b.x) or 0.0)) > delta
+        or abs((tonumber(a.y) or 0.0) - (tonumber(b.y) or 0.0)) > delta
+        or abs((tonumber(a.z) or 0.0) - (tonumber(b.z) or 0.0)) > delta
+end
+
+local function BuildAirFeedHeartbeatPayload()
+    local heli = PolCam.CurrentVehicle
+    if not PolCam.Active or not heli or not DoesEntityExist(heli) then
+        return nil
+    end
+
+    if not IsInAllowedHelicopter() then
+        return nil
+    end
+
+    if not PolCam.Camera or not DoesCamExist(PolCam.Camera) then
+        return nil
+    end
+
+    local heliNetId = SafeGetNetworkId(heli)
+    if not heliNetId then
+        return nil
+    end
+
+    local cameraCoords = PolCam.CameraCoords
+    if (type(cameraCoords) ~= 'vector3' and type(cameraCoords) ~= 'table') or not tonumber(cameraCoords.x or cameraCoords[1]) then
+        cameraCoords = GetEntityCoords(heli)
+    end
+
+    local targetNetId = nil
+    local targetType = nil
+    if PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
+        targetNetId = SafeGetNetworkId(PolCam.LockedTarget)
+        targetType = PolCam.LockedTargetType
+    end
+
+    return {
+        heliNetId = heliNetId,
+        camCoords = {
+            x = tonumber(cameraCoords.x or cameraCoords[1]) or 0.0,
+            y = tonumber(cameraCoords.y or cameraCoords[2]) or 0.0,
+            z = tonumber(cameraCoords.z or cameraCoords[3]) or 0.0,
+        },
+        camRot = GetCamRot(PolCam.Camera, 2),
+        fov = PolCam.FOV,
+        visionMode = PolCam.VisionMode,
+        operatorSource = GetPlayerServerId(PlayerId()),
+        targetNetId = targetNetId,
+        targetType = targetType,
+        label = GetCameraLabel(heli),
+    }
+end
+
+local function ShouldSendAirFeedHeartbeat(payload, now)
+    if type(payload) ~= 'table' then
+        return false
+    end
+
+    if (now - lastAirFeedHeartbeatAt) >= AIR_FEED_HEARTBEAT_FORCE_MS then
+        return true
+    end
+
+    local previous = lastAirFeedHeartbeatState
+    if type(previous) ~= 'table' then
+        return true
+    end
+
+    if tonumber(previous.heliNetId) ~= tonumber(payload.heliNetId) then
+        return true
+    end
+
+    if CoordsDiffer(previous.camCoords, payload.camCoords, 0.03) then
+        return true
+    end
+
+    if RotationDiffer(previous.camRot, payload.camRot, 0.05) then
+        return true
+    end
+
+    if abs((tonumber(previous.fov) or 0.0) - (tonumber(payload.fov) or 0.0)) > 0.05 then
+        return true
+    end
+
+    if tostring(previous.visionMode or '') ~= tostring(payload.visionMode or '') then
+        return true
+    end
+
+    if tonumber(previous.targetNetId) ~= tonumber(payload.targetNetId) then
+        return true
+    end
+
+    if tostring(previous.targetType or '') ~= tostring(payload.targetType or '') then
+        return true
+    end
+
+    return false
+end
+
+local function SendAirFeedHeartbeat()
+    local now = GetGameTimer()
+    if (now - lastAirFeedHeartbeatAt) < AIR_FEED_HEARTBEAT_INTERVAL_MS then
+        return
+    end
+
+    local payload = BuildAirFeedHeartbeatPayload()
+    if not payload then
+        return
+    end
+
+    if not ShouldSendAirFeedHeartbeat(payload, now) then
+        return
+    end
+
+    lastAirFeedHeartbeatAt = now
+    lastAirFeedHeartbeatState = payload
+    TriggerServerEvent('polcam:feedHeartbeat', payload)
+end
+
 CreateThread(function()
     while true do
-        Wait(1000) -- Heartbeat every second
-        
-        if PolCam.Active and PolCam.CurrentVehicle then
-            local heli = PolCam.CurrentVehicle
-            local plate = GetVehicleNumberPlateText(heli)
-            local model = GetEntityModel(heli)
-            local label = GetCameraLabel(heli)
-            
-            TriggerServerEvent('polfeeds:updateFeed', {
-                type = 'heli',
-                id = GetPlayerServerId(PlayerId()),
-                label = label,
-                unit = plate,
-                coords = GetEntityCoords(heli),
-                rotation = GetCamRot(PolCam.Camera, 2),
-                fov = PolCam.FOV,
-                visionMode = PolCam.VisionMode,
-                active = true
-            })
+        if PolCam.Active then
+            SendAirFeedHeartbeat()
+            Wait(AIR_FEED_HEARTBEAT_INTERVAL_MS)
+        else
+            Wait(500)
         end
     end
 end)

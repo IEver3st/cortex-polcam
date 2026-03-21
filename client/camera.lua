@@ -251,7 +251,16 @@ function ToggleGroundLock()
 end
 
 function SetGroundLock()
-    PolCam.GroundLockPoint = PolCam.GroundCoords
+    if PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
+        -- Freeze the current tracked point so releasing the freeze can resume target tracking.
+        PolCam.GroundLockPoint = GetEntityCoords(PolCam.LockedTarget)
+    else
+        PolCam.GroundLockPoint = PolCam.GroundCoords
+    end
+
+    if not PolCam.GroundLockPoint then
+        return
+    end
     
     if PlayPolCamSound then
         PlayPolCamSound("GroundLockOn")
