@@ -1,11 +1,8 @@
-/**
- * PolCam HUD JavaScript
- * Handles NUI messages and UI updates
- */
 
-// ============================================================================
-// State
-// ============================================================================
+
+
+
+
 const State = {
     visible: false,
     visionMode: 'normal',
@@ -26,12 +23,12 @@ const State = {
     lastFrameTime: performance.now(),
     highContrastEnabled: false,
     highContrastTheme: 'green',
-    // Configurable settings from Lua
+    
     timeFormat: 'LOCAL',
     dateFormat: 'MM/DD/YY',
     showSeconds: true,
     use24Hour: true,
-    // Unit labels
+    
     speedUnit: 'KTS',
     altitudeUnit: 'FT',
     distanceUnit: 'M'
@@ -63,16 +60,16 @@ function getDtSeconds() {
     return dt;
 }
 
-// ============================================================================
-// DOM Elements
-// ============================================================================
+
+
+
 const Elements = {};
 
-// ============================================================================
-// Initialization
-// ============================================================================
+
+
+
 document.addEventListener('DOMContentLoaded', () => {
-    // Cache DOM elements
+    
     Elements.container = document.getElementById('polcam-container');
     Elements.heading = document.getElementById('heading');
     Elements.currentTime = document.getElementById('current-time');
@@ -114,17 +111,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-    // New feature elements
+    
     Elements.postal = document.getElementById('postal');
     Elements.cameraLabel = document.getElementById('camera-label');
     Elements.rappelIndicator = document.getElementById('rappel-indicator');
     Elements.hoverAltitudePanel = document.getElementById('hover-altitude-panel');
 
-    // Pilot Hover (integrated into Pilot HUD)
+    
     Elements.pilotHoverIndicator = document.getElementById('pilot-hover-indicator');
     Elements.pilotHoverAltitude = document.getElementById('pilot-hover-altitude');
 
-    // Pilot HUD Elements
+    
     Elements.pilotHud = document.getElementById('pilot-hud');
     Elements.pilotTargetId = document.getElementById('pilot-target-id');
     Elements.pilotTargetDetails = document.getElementById('pilot-target-details');
@@ -134,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Elements.pilotTargetDistance = document.getElementById('pilot-target-distance');
     Elements.pilotSpotlightIndicator = document.getElementById('pilot-spotlight-indicator');
 
-    // Split Halo Elements
+    
     Elements.azimuthMarker = document.getElementById('azimuth-marker');
     Elements.azimuthValue = document.getElementById('azimuth-value');
     Elements.elevationArc = document.getElementById('elevation-arc');
@@ -142,14 +139,14 @@ document.addEventListener('DOMContentLoaded', () => {
     Elements.elevationMarker = document.getElementById('elevation-marker');
     Elements.elevationValue = document.getElementById('elevation-value');
 
-    // Start time update
+    
     updateTime();
     setInterval(updateTime, 1000);
 });
 
-// ============================================================================
-// NUI Message Handler
-// ============================================================================
+
+
+
 window.addEventListener('message', (event) => {
     const data = event.data;
 
@@ -207,9 +204,9 @@ window.addEventListener('message', (event) => {
     }
 });
 
-// ============================================================================
-// HUD Show/Hide
-// ============================================================================
+
+
+
 function showHUD(data) {
     State.visible = true;
     Elements.container.classList.remove('hidden');
@@ -220,7 +217,7 @@ function showHUD(data) {
         setVisionMode(data.visionMode);
     }
 
-    // Apply high contrast mode if configured
+    
     if (data.highContrast) {
         setHighContrast(data.highContrast.enabled, data.highContrast.theme);
     }
@@ -235,7 +232,7 @@ function hideHUD() {
     Elements.container.classList.remove('hud-fade-in');
     Elements.container.classList.add('hud-fade-out');
 
-    // Hide completely after fade animation
+    
     setTimeout(() => {
         if (!State.visible) {
             Elements.container.classList.add('hidden');
@@ -246,9 +243,9 @@ function hideHUD() {
     document.body.classList.remove('nightvision');
 }
 
-// ============================================================================
-// HUD Updates
-// ============================================================================
+
+
+
 
 
 function updateHUD(data) {
@@ -263,13 +260,13 @@ function updateHUD(data) {
     }
 
     const dt = getDtSeconds();
-    // UI smoothing (time-based): higher = snappier.
+    
     const pitchSmoothingHz = 18;
     const azimuthSmoothingHz = 45;
     const pitchAlpha = 1 - Math.exp(-pitchSmoothingHz * dt);
     const azimuthAlpha = 1 - Math.exp(-azimuthSmoothingHz * dt);
 
-    // Update heading
+    
     if (data.heading !== undefined) {
         State.heading = data.heading;
         if (Elements.heading) Elements.heading.textContent = data.heading;
@@ -277,34 +274,34 @@ function updateHUD(data) {
         if (Elements.gimbalHeading) Elements.gimbalHeading.textContent = data.heading + '°';
     }
 
-    // Update helicopter heading
+    
     if (data.heliHeading !== undefined) {
         if (Elements.heliHeading) Elements.heliHeading.textContent = data.heliHeading + '°';
     }
 
-    // Update helicopter speed with configurable units
+    
     if (data.heliSpeed !== undefined) {
         const speedUnit = data.heliSpeedUnit || State.speedUnit || 'KTS';
         if (Elements.heliSpeed) Elements.heliSpeed.textContent = data.heliSpeed + ' ' + speedUnit;
     }
 
-    // Update zoom
+    
     if (data.zoom !== undefined) {
         if (Elements.zoomLevel) Elements.zoomLevel.textContent = data.zoom;
     }
 
-    // Update altitude with configurable units
+    
     if (data.altitude !== undefined) {
         const altUnit = data.altitudeUnit || State.altitudeUnit || 'FT';
         if (Elements.altitude) Elements.altitude.textContent = data.altitude + ' ' + altUnit;
     }
 
-    // Update street name
+    
     if (data.street) {
         if (Elements.streetName) Elements.streetName.textContent = data.street || 'UNKNOWN';
     }
 
-    // Update camera pitch & Elevation Halo
+    
     if (data.pitch !== undefined) {
         State.targetPitch = data.pitch;
     }
@@ -312,30 +309,30 @@ function updateHUD(data) {
     if (data.pitchMin !== undefined) State.pitchMin = data.pitchMin;
     if (data.pitchMax !== undefined) State.pitchMax = data.pitchMax;
 
-    // Smooth pitch and update elevation UI
+    
     State.currentPitch = lerp(State.currentPitch, State.targetPitch, pitchAlpha);
     if (Elements.elevationValue) Elements.elevationValue.textContent = Math.floor(State.currentPitch) + '°';
     updateElevationHalo(State.currentPitch);
 
-    // Update Azimuth Halo (Relative to helicopter)
-    // 0° = Nose (Top), 90° = Right, 180° = Rear, 270° = Left
+    
+    
     if (data.heading !== undefined && data.heliHeading !== undefined) {
         State.targetAzimuth = wrap360(data.heading - data.heliHeading);
     }
 
-    // Smooth azimuth and update UI
+    
     State.currentAzimuth = lerpAngleDegrees(State.currentAzimuth, State.targetAzimuth, azimuthAlpha);
     if (Elements.azimuthValue) {
         const azimuthDisplay = wrap360(State.currentAzimuth);
         Elements.azimuthValue.textContent = String(Math.floor(azimuthDisplay)).padStart(3, '0') + '°';
     }
     if (Elements.azimuthMarker) {
-        // Mirror direction so the marker follows pan direction correctly.
+        
         Elements.azimuthMarker.style.transform = `rotate(${-State.currentAzimuth}deg)`;
         Elements.azimuthMarker.style.transformOrigin = '50% 50%';
     }
 
-    // New Data Points with configurable units
+    
     if (data.verticalSpeed !== undefined && Elements.verticalSpeed) {
         const vsUnit = data.verticalSpeedUnit || 'FPM';
         Elements.verticalSpeed.textContent = data.verticalSpeed + ' ' + vsUnit;
@@ -357,7 +354,7 @@ function updateHUD(data) {
         Elements.systemStatus.textContent = data.systemStatus;
     }
 
-    // Update postal display if available
+    
     if (Elements.postal) {
         if (data.postal) {
             Elements.postal.textContent = data.postal;
@@ -367,23 +364,23 @@ function updateHUD(data) {
         }
     }
 
-    // Update camera label if available
+    
     if (Elements.cameraLabel && data.cameraLabel) {
         Elements.cameraLabel.textContent = data.cameraLabel;
     }
 
-    // Update time/date config if provided
+    
     if (data.timeFormat) State.timeFormat = data.timeFormat;
     if (data.dateFormat) State.dateFormat = data.dateFormat;
     if (data.showSeconds !== undefined) State.showSeconds = data.showSeconds;
     if (data.use24Hour !== undefined) State.use24Hour = data.use24Hour;
 
-    // Update flight modes
+    
     if (data.hoverActive !== undefined) setHoverStatus(data.hoverActive);
     if (data.orbitActive !== undefined) setOrbitStatus(data.orbitActive);
     if (data.groundLockActive !== undefined) setGroundLockStatus(data.groundLockActive);
 
-    // Update target info if locked
+    
     if (data.hasTarget && data.targetInfo) {
         State.hasTarget = true;
         updateTargetInfo(data.targetInfo);
@@ -397,25 +394,25 @@ function updateHUD(data) {
     updateTrackingStatus();
 }
 
-// ============================================================================
-// Compass Tape
-// ============================================================================
+
+
+
 function updateCompassTape(heading) {
     if (!Elements.compassTape) return;
     const offset = -(heading * 3) + 200;
     Elements.compassTape.style.transform = `translateX(${offset}px)`;
 }
 
-// ============================================================================
-// Time & Date
-// ============================================================================
+
+
+
 function updateTime() {
     let now = new Date();
     let suffix = '';
 
-    // Handle time format
+    
     if (State.timeFormat === 'ZULU') {
-        // Convert to UTC
+        
         now = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
         suffix = 'Z';
     }
@@ -424,7 +421,7 @@ function updateTime() {
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
 
-    // Handle 12-hour format
+    
     let ampm = '';
     if (!State.use24Hour) {
         ampm = hours >= 12 ? ' PM' : ' AM';
@@ -468,9 +465,9 @@ function updateTime() {
     }
 }
 
-// ============================================================================
-// High Contrast Mode
-// ============================================================================
+
+
+
 function hexToRgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? {
@@ -484,13 +481,13 @@ function setHighContrast(enabled, theme) {
     State.highContrastEnabled = !!enabled;
     State.highContrastTheme = theme || 'green';
 
-    // Remove all highcontrast classes
+    
     const classes = Array.from(document.body.classList).filter(c => c.startsWith('highcontrast-'));
     if (classes.length > 0) {
         document.body.classList.remove(...classes);
     }
 
-    // Clear inline styles
+    
     document.body.style.removeProperty('--hud-color');
     document.body.style.removeProperty('--hud-glow');
     document.body.style.removeProperty('--hud-dim');
@@ -511,9 +508,9 @@ function setHighContrast(enabled, theme) {
     }
 }
 
-// ============================================================================
-// Vision Modes
-// ============================================================================
+
+
+
 function setVisionMode(mode) {
     State.visionMode = mode;
     document.body.classList.remove('nightvision');
@@ -528,9 +525,9 @@ function setVisionMode(mode) {
     }
 }
 
-// ============================================================================
-// Tracking System
-// ============================================================================
+
+
+
 function showTargetLocked(info) {
     State.hasTarget = true;
     if (Elements.lockStatus) Elements.lockStatus.textContent = 'TRACK';
@@ -557,9 +554,9 @@ function updateTargetInfo(info) {
     if (Elements.targetModel) Elements.targetModel.textContent = info.model || 'UNKNOWN';
 }
 
-// ============================================================================
-// Mode Status
-// ============================================================================
+
+
+
 function setSpotlightStatus(active) {
     State.spotlightActive = active;
     if (Elements.spotlightIndicator) {
@@ -581,8 +578,8 @@ function ensureHighContrastApplied() {
 function setHoverStatus(active, altitude) {
     State.hoverActive = active;
 
-    // If hover is shown while the camera UI is off, we can be visible before
-    // the main HUD ever called setHighContrast(). Ensure high contrast is applied.
+    
+    
     ensureHighContrastApplied();
 
     if (Elements.hoverIndicator) {
@@ -593,14 +590,14 @@ function setHoverStatus(active, altitude) {
         Elements.hoverAltitudePanel.textContent = altitude;
     }
 
-    // Integrated hover status into Pilot HUD when camera is off
+    
     if (Elements.pilotHoverIndicator) {
         const showPilotHover = active && !State.visible;
         Elements.pilotHoverIndicator.classList.toggle('hidden', !showPilotHover);
         Elements.pilotHoverIndicator.classList.toggle('blink', showPilotHover);
     }
     if (Elements.pilotHoverAltitude && altitude !== undefined) {
-        // Expect input like "386 FT"; display compact like "386FT"
+        
         const compactAlt = String(altitude).replace(/\s+FT\b/i, 'FT');
         Elements.pilotHoverAltitude.textContent = compactAlt;
     }
@@ -644,9 +641,9 @@ function updateTrackingStatus() {
     }
 }
 
-// ============================================================================
-// Gimbal Halo Helpers
-// ============================================================================
+
+
+
 function updateElevationHalo(pitch) {
     const arcEl = Elements.elevationArc || Elements.elevationTrack;
     if (!arcEl || !Elements.elevationMarker) return;
@@ -655,22 +652,22 @@ function updateElevationHalo(pitch) {
     const centerX = 50;
     const centerY = 50;
 
-    // Expected pitch semantics from client:
-    // - Negative pitch = looking down
-    // - Positive pitch = looking up
-    // Use dynamic limits from config.
+    
+    
+    
+    
     const minPitch = typeof State.pitchMin === 'number' ? State.pitchMin : -90;
     const maxPitch = typeof State.pitchMax === 'number' ? State.pitchMax : 30;
     const clampedPitch = clamp(pitch, minPitch, maxPitch);
 
-    // Map pitch into the left-side arc.
-    // minPitch -> 225deg (bottom-left)
-    // maxPitch -> 105deg (top-left)
+    
+    
+    
     const t = (clampedPitch - minPitch) / Math.max(0.0001, (maxPitch - minPitch));
     const endAngle = 225 - (t * 120);
     const startAngle = 105;
 
-    // Calculate positions
+    
     const startRad = startAngle * Math.PI / 180;
     const endRad = endAngle * Math.PI / 180;
 
@@ -679,14 +676,14 @@ function updateElevationHalo(pitch) {
     const endX = centerX + radius * Math.cos(endRad);
     const endY = centerY + radius * Math.sin(endRad);
 
-    // Draw the track from top-left toward end position.
+    
     const sweepFlag = 1;
 
-    // Always draw the arc (even at 0, it's just a point)
+    
     const d = `M ${startX.toFixed(2)} ${startY.toFixed(2)} A ${radius} ${radius} 0 0 ${sweepFlag} ${endX.toFixed(2)} ${endY.toFixed(2)}`;
     arcEl.setAttribute("d", d);
 
-    // Update marker dot position
+    
     Elements.elevationMarker.setAttribute("cx", endX.toFixed(2));
     Elements.elevationMarker.setAttribute("cy", endY.toFixed(2));
 }
@@ -699,21 +696,21 @@ function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
     };
 }
 
-// ============================================================================
-// UI Visibility
-// ============================================================================
+
+
+
 function toggleUIVisibility(visible) {
     State.uiVisible = visible;
     Elements.container.style.opacity = visible ? '1' : '0.2';
 }
 
-// ============================================================================
-// Pilot HUD (Tracking HUD)
-// ============================================================================
+
+
+
 function updatePilotHUD(data, config) {
     if (!Elements.pilotHud) return;
 
-    // Apply high contrast preference if provided (pilot HUD can be shown without camera UI).
+    
     if (data.highContrast && data.highContrast.enabled !== undefined) {
         setHighContrast(data.highContrast.enabled, data.highContrast.theme);
     }
@@ -722,7 +719,7 @@ function updatePilotHUD(data, config) {
         applyTrackColors(data.trackColors);
     }
 
-    // Apply configuration
+    
     if (config) {
         if (config.Position === 'top-left') {
             Elements.pilotHud.classList.add('top-left');
@@ -731,10 +728,10 @@ function updatePilotHUD(data, config) {
         }
     }
 
-    // Update visibility
+    
     Elements.pilotHud.classList.remove('hidden');
 
-    // Update content
+    
     if (data.targetId && Elements.pilotTargetId) {
         Elements.pilotTargetId.textContent = data.targetId;
     }
@@ -765,8 +762,8 @@ function updatePilotHUD(data, config) {
         Elements.pilotTargetDistance.textContent = Math.floor(data.distance) + ' M';
     }
 
-    // Allow Lua Pilot HUD updates to drive the hover indicator while camera is off.
-    // (This covers the case: hovering + no target lock.)
+    
+    
     if (data.hoverActive !== undefined) {
         setHoverStatus(!!data.hoverActive, data.hoverAltitude);
     }

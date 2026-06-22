@@ -1,9 +1,3 @@
---[[
-    PolCam - Street Labels
-    Optimized road name labels with toggle support.
-]]
-
--- Cache natives for performance
 local GetScreenCoordFromWorldCoord = GetScreenCoordFromWorldCoord
 local GetClosestVehicleNodeWithHeading = GetClosestVehicleNodeWithHeading
 local GetStreetNameAtCoord = GetStreetNameAtCoord
@@ -23,10 +17,8 @@ local EndTextCommandDisplayText = EndTextCommandDisplayText
 local StartShapeTestRay = StartShapeTestRay
 local GetShapeTestResult = GetShapeTestResult
 
--- Cache math
 local math_ceil = math.ceil
 
--- State
 local StreetOverlayEnabled = true
 local Labels = {}
 local LabelsCount = 0
@@ -34,21 +26,18 @@ local LastUpdateTime = 0
 local LastUpdateX = 0
 local LastUpdateY = 0
 
--- Config (can be overridden from Config.StreetOverlay)
-local UPDATE_INTERVAL = 2000         -- Time between updates (reduced frequency)
-local UPDATE_DISTANCE_SQ = 120.0 * 120.0 -- Distance threshold before re-scanning
-local SAMPLE_RADIUS = 150.0          -- Slightly smaller radius
-local SAMPLE_SPACING = 85.0          -- Larger spacing (fewer samples = fewer raycasts)
-local LABEL_SPACING_SQ = 140.0 * 140.0 -- Spacing between identical street labels
-local MAX_LABELS = 8                 -- Fewer labels to reduce raycast + draw overhead
-local MAX_DRAW_DISTANCE_SQ = 500.0 * 500.0 -- Max distance from camera to draw a label
-local MAX_DRAW_PER_FRAME = 4         -- Limit draw calls per frame to reduce GPU pressure
+local UPDATE_INTERVAL = 2000
+local UPDATE_DISTANCE_SQ = 120.0 * 120.0
+local SAMPLE_RADIUS = 150.0
+local SAMPLE_SPACING = 85.0
+local LABEL_SPACING_SQ = 140.0 * 140.0
+local MAX_LABELS = 8
+local MAX_DRAW_DISTANCE_SQ = 500.0 * 500.0
+local MAX_DRAW_PER_FRAME = 4
 
--- Text settings
 local TEXT_SCALE = 0.22
 local TEXT_R, TEXT_G, TEXT_B, TEXT_A = 200, 230, 255, 180
 
--- Toggle function (called from main.lua)
 function ToggleStreetOverlay()
     StreetOverlayEnabled = not StreetOverlayEnabled
     if not StreetOverlayEnabled then
@@ -57,34 +46,32 @@ function ToggleStreetOverlay()
     end
 end
 
--- Check if enabled (for external use)
 function IsStreetOverlayEnabled()
     return StreetOverlayEnabled
 end
 
--- Optimized label update - runs less frequently
 local function UpdateLabels(cx, cy, cz)
     local newLabels = {}
     local count = 0
     local placed = {}
-    
+
     local steps = math_ceil(SAMPLE_RADIUS * 2 / SAMPLE_SPACING)
     local startX = cx - SAMPLE_RADIUS
     local startY = cy - SAMPLE_RADIUS
-    
+
     for gx = 0, steps do
         if count >= MAX_LABELS then break end
         local x = startX + gx * SAMPLE_SPACING
-        
+
         for gy = 0, steps do
             if count >= MAX_LABELS then break end
             local y = startY + gy * SAMPLE_SPACING
-            
+
             local ok, pos = GetClosestVehicleNodeWithHeading(x, y, cz, 1, 3.0, 0)
             if ok then
                 local streetHash = GetStreetNameAtCoord(pos.x, pos.y, pos.z)
                 if streetHash and streetHash ~= 0 then
-                    -- Check spacing from same street
+
                     local tooClose = false
                     local existingPositions = placed[streetHash]
                     if existingPositions then
@@ -98,24 +85,24 @@ local function UpdateLabels(cx, cy, cz)
                             end
                         end
                     end
-                    
+
                     if not tooClose then
-                        -- Check Line of Sight (Optimization: Don't show labels through buildings)
+
                         local visible = true
                         if PolCam.CameraCoords then
-                            -- Raycast from camera to 1.5m above the road node (Flag 1: Map/World only)
+
                             local ray = StartShapeTestRay(
                                 PolCam.CameraCoords.x, PolCam.CameraCoords.y, PolCam.CameraCoords.z,
                                 pos.x, pos.y, pos.z + 1.5,
                                 1, PolCam.CurrentVehicle, 0
                             )
                             local _, hit, _, _, _ = GetShapeTestResult(ray)
-                            -- If hit is 1 or true, we hit something (blocked)
-                            if hit == 1 or hit == true then 
-                                visible = false 
+
+                            if hit == 1 or hit == true then
+                                visible = false
                             end
                         end
-                    
+
                         if visible then
                             local name = GetStreetNameFromHashKey(streetHash)
                             if name and name ~= "" then
@@ -124,7 +111,7 @@ local function UpdateLabels(cx, cy, cz)
                                     existingPositions = placed[streetHash]
                                 end
                                 existingPositions[#existingPositions + 1] = pos
-                                
+
                                 count = count + 1
                                 newLabels[count] = {
                                     x = pos.x,
@@ -139,7 +126,7 @@ local function UpdateLabels(cx, cy, cz)
             end
         end
     end
-    
+
     Labels = newLabels
     LabelsCount = count
     LastUpdateTime = GetGameTimer()

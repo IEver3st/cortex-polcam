@@ -1,9 +1,3 @@
---[[
-    PolCam Targeting System
-    Line-of-sight based vehicle/ped tracking with persistent tracking support
-]]
-
--- Native Caching
 local DoesEntityExist = DoesEntityExist
 local GetEntityCoords = GetEntityCoords
 local GetEntityModel = GetEntityModel
@@ -60,8 +54,6 @@ local ClearDrawOrigin = ClearDrawOrigin
 local CreateThread = CreateThread
 local Wait = Wait
 
--- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
-
 local function isEsLibStarted()
     return GetResourceState('es_lib') == 'started'
 end
@@ -75,7 +67,6 @@ local function canUseEsLibDebugPanel()
         and type(exports.es_lib.hideDebugPanel) == 'function'
 end
 
--- Math Caching
 local math_sqrt = math.sqrt
 local math_max = math.max
 local math_min = math.min
@@ -99,7 +90,6 @@ local function math_clamp(v, minV, maxV)
     return v
 end
 
--- Tracking State
 local Tracking = {
     lastScanTime = 0,
     scanIntervalMs = 75,
@@ -143,7 +133,6 @@ local Tracking = {
     }
 }
 
--- Persistent Tracking State
 local PersistentTracking = {
     Active = false,
     LoopRunning = false,
@@ -154,7 +143,6 @@ local PersistentTracking = {
     SyncIntervalMs = 200
 }
 
--- Unified Heli Tracking State
 local HeliTrackingState = {
     active = false,
     targetNetId = nil,
@@ -173,7 +161,6 @@ local lastCandidateTime = 0
 
 local SyncedTracking = HeliTrackingState
 
--- Optimization Caches
 local ModelNameCache = {}
 local MakeNameCache = {}
 local LastUpdateLockedTime = 0
@@ -196,7 +183,6 @@ local function shouldLogScans()
     return Config and Config.Debug and Config.Debug.LogScans
 end
 
--- Utility Functions
 local function GetHelicopterPosition()
     if not PolCam.CurrentVehicle or not DoesEntityExist(PolCam.CurrentVehicle) then
         return nil
@@ -232,9 +218,9 @@ local function GetMaxAcquireDistance(entityType)
     local tracking = Config.Tracking
     local camera = Config.Camera
     local defaultDist = (camera and camera.RenderDistance) or 1000.0
-    
+
     if not tracking then return defaultDist end
-    
+
     if entityType == "vehicle" then
         return tracking.TargetingMaxDistanceVehicles or defaultDist
     elseif entityType == "ped" then
@@ -268,7 +254,7 @@ local function FindBestEntityOnRay(camPos, camDir, radius, scanRange)
     local bestPerp = math_huge
     local bestAlong = math_huge
     local radiusSq = radius * radius
-    
+
     local playerPed = PlayerPedId()
     local currentVehicle = PolCam.CurrentVehicle
 
@@ -283,7 +269,7 @@ local function FindBestEntityOnRay(camPos, camDir, radius, scanRange)
         local toEntY = targetPoint.y - camPos.y
         local toEntZ = targetPoint.z - camPos.z
         local along = (toEntX * dirX) + (toEntY * dirY) + (toEntZ * dirZ)
-        
+
         if along <= 0.0 or along > scanRange then return end
 
         local closestX = camPos.x + dirX * along
@@ -293,9 +279,9 @@ local function FindBestEntityOnRay(camPos, camDir, radius, scanRange)
         local perpY = targetPoint.y - closestY
         local perpZ = targetPoint.z - closestZ
         local perpSq = perpX*perpX + perpY*perpY + perpZ*perpZ
-        
+
         if perpSq > radiusSq then return end
-        
+
         local perp = math_sqrt(perpSq)
 
         if perp < bestPerp or (math_abs(perp - bestPerp) < 0.05 and along < bestAlong) then
@@ -327,51 +313,50 @@ GetEntityTargetPoint = function(entity)
     if not entity or entity == 0 or not DoesEntityExist(entity) then
         return nil
     end
-    
+
     local coords = GetEntityCoords(entity)
-    
+
     if IsEntityAPed(entity) then
         return coords + vector3(0.0, 0.0, 0.7)
     end
-    
+
     if IsEntityAVehicle(entity) then
         local minDim, maxDim = GetModelDimensions(GetEntityModel(entity))
         local z = coords.z + ((maxDim.z - minDim.z) * 0.75)
         return vector3(coords.x, coords.y, z)
     end
-    
+
     return coords
 end
 
--- Debug Visualization
 local function DrawDebugLine(startPos, endPos, r, g, b, a)
     DrawLine(startPos.x, startPos.y, startPos.z, endPos.x, endPos.y, endPos.z, r, g, b, a)
 end
 
 local function DrawDebugSphere(pos, radius, r, g, b, a)
-    DrawMarker(28, pos.x, pos.y, pos.z, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        radius * 2, radius * 2, radius * 2, 
-        r, g, b, a, 
+    DrawMarker(28, pos.x, pos.y, pos.z,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        radius * 2, radius * 2, radius * 2,
+        r, g, b, a,
         false, false, 2, nil, nil, false)
 end
 
 local function DrawDebugBox(entity, r, g, b, a)
     if not entity or not DoesEntityExist(entity) then return end
-    
+
     local pos = GetEntityCoords(entity)
     local model = GetEntityModel(entity)
     local minDim, maxDim = GetModelDimensions(model)
-    
+
     local sizeX = maxDim.x - minDim.x
     local sizeY = maxDim.y - minDim.y
     local sizeZ = maxDim.z - minDim.z
-    
+
     local heading = GetEntityHeading(entity)
-    DrawMarker(1, pos.x, pos.y, pos.z + sizeZ/2, 
-        0.0, 0.0, 0.0, 0.0, 0.0, heading, 
-        sizeX + 0.5, sizeY + 0.5, sizeZ + 0.5, 
-        r, g, b, a, 
+    DrawMarker(1, pos.x, pos.y, pos.z + sizeZ/2,
+        0.0, 0.0, 0.0, 0.0, 0.0, heading,
+        sizeX + 0.5, sizeY + 0.5, sizeZ + 0.5,
+        r, g, b, a,
         false, false, 2, nil, nil, false)
 end
 
@@ -390,32 +375,31 @@ local function DrawDebugText(text, x, y, scale, r, g, b, a)
 end
 
 local function RenderDebugPanel()
-    -- Native DrawText debug panel replaced by es_lib debug panel.
-    -- Kept as a no-op to avoid changing other call sites.
+
     return
 end
 
 local function RenderDebugVisuals()
     if not Config.Debug or not Config.Debug.Enabled then return end
     if not PolCam.Active then return end
-    
+
     local dbg = Tracking.debug
-    
+
     if Config.Debug.ShowRaycast and dbg.camPos and dbg.endPos then
         local col = Config.Debug.RaycastColor or {0, 255, 255, 200}
         DrawDebugLine(dbg.camPos, dbg.endPos, col[1], col[2], col[3], col[4])
     end
-    
+
     if Config.Debug.ShowDetectionRadius and dbg.probeHitPos and dbg.calculatedRadius then
         local col = Config.Debug.DetectionColor or {255, 255, 0, 100}
         DrawDebugSphere(dbg.probeHitPos, dbg.calculatedRadius, col[1], col[2], col[3], col[4])
     end
-    
+
     if Config.Debug.ShowHitPoint and dbg.entityHitPos then
         local col = Config.Debug.HitPointColor or {0, 255, 0, 255}
         DrawDebugSphere(dbg.entityHitPos, 0.5, col[1], col[2], col[3], col[4])
     end
-    
+
     if Config.Debug.ShowTargetBox and Tracking.candidateEntity and DoesEntityExist(Tracking.candidateEntity) then
         local col = Config.Debug.TargetBoxColor or {255, 128, 0, 200}
         DrawDebugBox(Tracking.candidateEntity, col[1], col[2], col[3], col[4])
@@ -594,7 +578,6 @@ local function updateEsLibDebugPanel(force)
         return
     end
 
-    -- Requirement: no es_lib installed/running -> disable all PolCam debug features
     if GetResourceState('es_lib') ~= 'started' then
         forceDisableAllDebug()
         return
@@ -726,11 +709,10 @@ local function ScoreCandidate(entity, entityType, camPos, camDir, scanRange, rad
     return score, targetPoint, netId, perp
 end
 
--- Target Scanning
 local function ScanForTarget()
     Tracking.candidateEntity = nil
     Tracking.candidateType = nil
-    
+
     Tracking.debug.entityHit = false
     Tracking.debug.entityHitPos = nil
     Tracking.debug.hitEntityType = "none"
@@ -749,12 +731,12 @@ local function ScanForTarget()
     Tracking.debug.camPos = camPos
     Tracking.debug.camDir = camDir
     Tracking.debug.heliPos = GetHelicopterPosition()
-    
+
     local scanRange = Config.Camera.RenderDistance or 1000.0
     local endPos = camPos + (camDir * scanRange)
     Tracking.debug.scanRange = scanRange
     Tracking.debug.endPos = endPos
-    
+
     local probeHandle = StartShapeTestRay(
         camPos.x, camPos.y, camPos.z,
         endPos.x, endPos.y, endPos.z,
@@ -803,7 +785,6 @@ local function ScanForTarget()
     local probeRadius = math_max(baseRadius * 0.7, radius * 0.45)
     local offsetDistance = math_max(baseRadius * 1.0, radius * 0.5)
 
-    -- 5 probes for comprehensive coverage (Center + cardinal directions)
     local probes = {
         { label = "center", offset = vector3(0.0, 0.0, 0.0) },
         { label = "up", offset = camUp * offsetDistance },
@@ -973,7 +954,6 @@ local function ScanForTarget()
     end
 end
 
--- Tracking Control
 local function ResetTrackingState()
     Tracking.candidateEntity = nil
     Tracking.candidateType = nil
@@ -1027,7 +1007,7 @@ end
 
 function ClearLock()
     local hadLock = PolCam.LockedTarget ~= nil
-    
+
     lastLockedTargetNetId = nil
     Tracking.occludedSince = nil
 
@@ -1054,29 +1034,25 @@ function ClearLock()
     end
 end
 
--- Called when the camera is activated to set the timestamp for grace period calculations
 function OnCameraActivated_Tracking()
     Tracking.cameraActivatedTime = GetGameTimer()
 end
 
--- Lock acquisition state
 local LockingInProgress = false
 
--- Helper to check if es_lib is available
 local function IsEsLibAvailable()
-    return GetResourceState('es_lib') == 'started' 
-        and type(exports) == 'table' 
-        and exports.es_lib 
+    return GetResourceState('es_lib') == 'started'
+        and type(exports) == 'table'
+        and exports.es_lib
         and exports.es_lib.progress
 end
 
--- Internal function to complete the lock after validation/progress
 local function CompleteLock(entity, entityType)
     if not entity or not DoesEntityExist(entity) then
         LockingInProgress = false
         return false
     end
-    
+
     PolCam.LockedTarget = entity
     PolCam.LockedTargetType = entityType
     PolCam.TargetInfo = GetTargetInfo(entity, entityType)
@@ -1091,7 +1067,6 @@ local function CompleteLock(entity, entityType)
 
     lastLockedTargetNetId = targetNetId
 
-    -- For the player's own vehicle, use direct native (always networked)
     local vehicleNetId = nil
 
     if PolCam.CurrentVehicle and DoesEntityExist(PolCam.CurrentVehicle) then
@@ -1117,66 +1092,59 @@ local function CompleteLock(entity, entityType)
     if shouldLogEvents() then
         print(('[PolCam] lock complete net=%s type=%s'):format(tostring(targetNetId), tostring(entityType)))
     end
-    
+
     LockingInProgress = false
     return true
 end
 
--- Grace period (ms) after camera activation where we won't toggle off an existing lock
 local REENTRY_GRACE_PERIOD_MS = 500
 
 function StartLocking()
-    -- If we already have a locked target, this is a toggle-off request
+
     if PolCam.LockedTarget then
-        -- Don't toggle off if we just re-entered the camera with an existing lock
-        -- This prevents accidental unlocks when re-entering with a persistent track
+
         local now = GetGameTimer()
         local timeSinceActivation = now - (Tracking.cameraActivatedTime or 0)
         if timeSinceActivation < REENTRY_GRACE_PERIOD_MS then
-            -- Within grace period, ignore this toggle-off attempt
+
             return
         end
-        
+
         ClearLock()
         PlayPolCamSound("TargetLost")
         return
     end
-    
+
     if LockingInProgress then
         return
     end
-    
+
     if not Tracking.candidateEntity or not DoesEntityExist(Tracking.candidateEntity) then
         return
     end
-    
+
     if not Tracking.candidateType then
         return
     end
-    
-    -- Capture the candidate before async operation
+
     local targetEntity = Tracking.candidateEntity
     local targetType = Tracking.candidateType
-    
-    -- Instant lock mode - lock immediately
+
     if Config.InstantLock then
         CompleteLock(targetEntity, targetType)
         return
     end
-    
-    -- Non-instant mode - use es_lib radial progress
+
     if not IsEsLibAvailable() then
-        -- Fallback to instant lock if es_lib not available
+
         CompleteLock(targetEntity, targetType)
         return
     end
-    
+
     LockingInProgress = true
-    
-    -- Get the lock duration from config (default 2000ms)
+
     local lockDuration = (Config.Tracking and Config.Tracking.LockDurationMs) or 2000
-    
-    -- Run the progress UI in a thread to avoid blocking
+
     CreateThread(function()
         local completed = exports.es_lib:progress({
             duration = lockDuration,
@@ -1192,31 +1160,27 @@ function StartLocking()
                 mouse = false
             }
         })
-        
+
         if not completed then
-            -- Cancelled by user
+
             LockingInProgress = false
             return
         end
-        
-        -- Verify target still exists and is still the same candidate
+
         if not DoesEntityExist(targetEntity) then
             LockingInProgress = false
             return
         end
-        
-        -- Verify we still have a valid camera
+
         if not PolCam.Active then
             LockingInProgress = false
             return
         end
-        
-        -- Complete the lock
+
         CompleteLock(targetEntity, targetType)
     end)
 end
 
--- Occlusion Check
 local function BuildOcclusionSamplePoints(target, targetPoint, targetType)
     local points = { targetPoint }
     if targetType == "vehicle" then
@@ -1283,7 +1247,6 @@ local function CheckTargetOcclusion(now)
     if (now - Tracking.lastOcclusionCheck) < intervalMs then return end
     Tracking.lastOcclusionCheck = now
 
-    -- Determine ray origin: use camera coords when active, otherwise helicopter position
     local origin = PolCam.Active and PolCam.CameraCoords or GetHelicopterPosition()
     if not origin then return end
 
@@ -1340,7 +1303,7 @@ local function CheckTargetOcclusion(now)
     end
 
     if occluded then
-        -- Target is occluded
+
         if not Tracking.occludedSince then
             Tracking.occludedSince = now
         end
@@ -1350,12 +1313,11 @@ local function CheckTargetOcclusion(now)
             PlayPolCamSound("TargetLost")
         end
     else
-        -- Line of sight is clear
+
         Tracking.occludedSince = nil
     end
 end
 
--- Active Tracking Update
 local function UpdateActiveTracking(now)
     if not PolCam.LockedTarget or not DoesEntityExist(PolCam.LockedTarget) then
         ClearLock()
@@ -1365,13 +1327,11 @@ local function UpdateActiveTracking(now)
 
     CheckTargetOcclusion(now)
 
-    -- Target may have been cleared by occlusion check
     if not PolCam.LockedTarget then return end
 
     UpdateLockedTargetInfo()
 end
 
--- Tracking Update (called every frame)
 local function ShouldDrawTargetLabel(cfg)
     if not cfg or not cfg.Enabled then return false end
     if PolCam.Active then
@@ -1389,8 +1349,7 @@ local function GetHighContrastColor()
     end
 
     local theme = Config.UI.HighContrast.Theme or "green"
-    
-    -- Handle Hex Colors (e.g. "#FF00FF")
+
     if theme:sub(1,1) == "#" then
         local r = tonumber(theme:sub(2,3), 16) or 255
         local g = tonumber(theme:sub(4,5), 16) or 255
@@ -1446,7 +1405,7 @@ local function DrawWorldTargetLabel()
     if dt < 1.0 then
         t = 1.0 - math_exp(-smoothingSpeed * dt)
     end
-    
+
     local smoothedDistance = Tracking.labelSmoothedDistance or distance
     smoothedDistance = smoothedDistance + (distance - smoothedDistance) * t
     Tracking.labelSmoothedDistance = smoothedDistance
@@ -1489,34 +1448,33 @@ end
 
 function UpdateTargeting()
     if not Config.Tracking or not Config.Tracking.Enabled then return end
-    
+
     local now = GetGameTimer()
 
     Tracking.debug.zoom = PolCam and PolCam.Zoom or 0
     Tracking.debug.fov = PolCam and PolCam.FOV or 0
-    
+
     if now - Tracking.lastScanTime >= Tracking.scanIntervalMs then
         Tracking.lastScanTime = now
-        
+
         if not PolCam.LockedTarget then
             ScanForTarget()
         end
     end
 
     Tracking.debug.candidateType = Tracking.candidateType
-    
+
     if PolCam.LockedTarget then
         UpdateActiveTracking(now)
         DrawWorldTargetLabel()
     end
 end
 
--- Unified Heli Tracking Sync
 local function GetCurrentVehicleNetId()
     local ped = PlayerPedId()
     local vehicle = GetVehiclePedIsIn(ped, false)
     if vehicle == 0 or not DoesEntityExist(vehicle) then return nil end
-    -- For the player's own vehicle, use direct native (always networked)
+
     return NetworkGetNetworkIdFromEntity(vehicle)
 end
 
@@ -1547,7 +1505,7 @@ local function SyncLocalLockToHeliState()
             PolCam.TargetInfo = targetInfo
             PersistentTracking.Active = true
             lastLockedTargetNetId = HeliTrackingState.targetNetId
-            
+
             if not wasAlreadyLocked and HeliTrackingState.ownerSrc ~= myId then
                 if PlayPolCamSound then
                     PlayPolCamSound("TargetLocked")
@@ -1592,10 +1550,10 @@ local function SyncLocalLockToHeliState()
         PolCam.LockedTargetType = nil
         PolCam.TargetInfo = nil
         PersistentTracking.Active = false
-        
+
         ResetTrackingState()
         SendLockClearedToNUI()
-        
+
         if hadLock or hadPersistent then
             if ResetCameraZoomToDefault then
                 ResetCameraZoomToDefault()
@@ -1613,15 +1571,15 @@ end
 RegisterNetEvent('polcam:heliTrackingState')
 AddEventHandler('polcam:heliTrackingState', function(vehicleNetId, state)
     local myVehicleNetId = GetCurrentVehicleNetId()
-    
+
     if myVehicleNetId ~= vehicleNetId then
         return
     end
-    
+
     if state.seq and HeliTrackingState.seq and state.seq < HeliTrackingState.seq then
         return
     end
-    
+
     HeliTrackingState.active = state.active or false
     HeliTrackingState.targetNetId = state.targetNetId
     HeliTrackingState.targetType = state.targetType
@@ -1648,7 +1606,7 @@ AddEventHandler('polcam:heliTrackingState', function(vehicleNetId, state)
             lastSharedLogOwner = HeliTrackingState.ownerSrc
         end
     end
-    
+
     SyncLocalLockToHeliState()
 end)
 
@@ -1703,46 +1661,44 @@ AddEventHandler('polcam:trackingUpdate', function(sourcePlayerId, data)
     end
 end)
 
--- Plate Visibility Check
 function IsPlateVisible(vehicle)
     if not vehicle or not DoesEntityExist(vehicle) then return false end
-    
+
     local camCoords = PolCam.Active and PolCam.CameraCoords or GetEntityCoords(PolCam.CurrentVehicle)
     if not camCoords then return false end
-    
+
     local vehCoords = GetEntityCoords(vehicle)
     local vehForward = GetEntityForwardVector(vehicle)
-    
+
     local toCamX = camCoords.x - vehCoords.x
     local toCamY = camCoords.y - vehCoords.y
     local toCamZ = camCoords.z - vehCoords.z
     local len = math_sqrt(toCamX*toCamX + toCamY*toCamY + toCamZ*toCamZ)
     if len == 0 then return false end
-    
+
     local invLen = 1 / len
     toCamX = toCamX * invLen
     toCamY = toCamY * invLen
     toCamZ = toCamZ * invLen
-    
+
     local dot = vehForward.x * toCamX + vehForward.y * toCamY + vehForward.z * toCamZ
-    
+
     if not cachedPlateThreshold then
         local angle = (Config.Tracking and Config.Tracking.PlateVisibilityAngle) or 45.0
         cachedPlateThreshold = math_cos(math_rad(angle))
     end
-    
+
     return math_abs(dot) >= cachedPlateThreshold
 end
 
--- Target Info Extraction
 function GetTargetInfo(entity, entityType)
     if not entity or not DoesEntityExist(entity) then
         return nil
     end
-    
+
     local coords = GetEntityCoords(entity)
     local heliPos = GetHelicopterPosition()
-    
+
     local info = {
         type = entityType,
         coords = coords,
@@ -1750,33 +1706,33 @@ function GetTargetInfo(entity, entityType)
         heading = math_floor(GetEntityHeading(entity)),
         distance = heliPos and #(heliPos - coords) or 0,
     }
-    
+
     if entityType == "vehicle" then
         local modelHash = GetEntityModel(entity)
-        
+
         if not MakeNameCache[modelHash] then
             local makeStr = GetLabelText(GetMakeNameFromVehicleModel(modelHash))
             MakeNameCache[modelHash] = (makeStr == "NULL") and "UNKNOWN" or makeStr
         end
         info.make = MakeNameCache[modelHash]
-        
+
         if not ModelNameCache[modelHash] then
             local modelStr = GetLabelText(GetDisplayNameFromVehicleModel(modelHash))
-            if modelStr == "NULL" then 
-                modelStr = GetDisplayNameFromVehicleModel(modelHash) 
+            if modelStr == "NULL" then
+                modelStr = GetDisplayNameFromVehicleModel(modelHash)
             end
             ModelNameCache[modelHash] = modelStr
         end
         info.model = ModelNameCache[modelHash]
-        
+
         if IsPlateVisible(entity) then
             info.plate = GetVehicleNumberPlateText(entity)
         else
             info.plate = "OBSCURED"
         end
-        
+
         info.class = GetVehicleClass(entity)
-        
+
         local driver = GetPedInVehicleSeat(entity, -1)
         if driver and driver ~= 0 and DoesEntityExist(driver) then
             if IsPedAPlayer(driver) then
@@ -1787,7 +1743,7 @@ function GetTargetInfo(entity, entityType)
                 info.isPlayerVehicle = false
             end
         end
-        
+
     elseif entityType == "ped" then
         if IsPedAPlayer(entity) then
             info.name = GetPlayerName(NetworkGetPlayerIndexFromPed(entity))
@@ -1796,12 +1752,12 @@ function GetTargetInfo(entity, entityType)
             info.name = "Civilian"
             info.isPlayer = false
         end
-        
+
         if IsPedInAnyVehicle(entity, false) then
             local veh = GetVehiclePedIsIn(entity, false)
             info.inVehicle = true
             info.vehicleModel = GetDisplayNameFromVehicleModel(GetEntityModel(veh))
-            
+
             if IsPlateVisible(veh) then
                 info.vehiclePlate = GetVehicleNumberPlateText(veh)
             else
@@ -1809,30 +1765,29 @@ function GetTargetInfo(entity, entityType)
             end
         end
     end
-    
+
     return info
 end
 
--- Update Locked Target Info
 function UpdateLockedTargetInfo()
     if not PolCam.LockedTarget or not DoesEntityExist(PolCam.LockedTarget) then
         return
     end
-    
+
     if not PolCam.LockedTargetType then
         ClearLock()
         PlayPolCamSound("TargetLost")
         return
     end
-    
+
     local now = GetGameTimer()
     if now - LastUpdateLockedTime < UPDATE_LOCKED_INTERVAL then
         return
     end
     LastUpdateLockedTime = now
-    
+
     PolCam.TargetInfo = GetTargetInfo(PolCam.LockedTarget, PolCam.LockedTargetType)
-    
+
     if not PolCam.TargetInfo then
         ClearLock()
         PlayPolCamSound("TargetLost")
@@ -1840,7 +1795,6 @@ function UpdateLockedTargetInfo()
     end
 end
 
--- Persistent Tracking
 function GetLockedTargetCoords()
     if not PolCam.LockedTarget or not DoesEntityExist(PolCam.LockedTarget) then
         return nil
@@ -1859,7 +1813,7 @@ end
 function OnCameraDeactivated_Tracking()
     if PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
         PersistentTracking.Active = true
-        
+
         if not PersistentTracking.LoopRunning then
             PersistentTracking.LoopRunning = true
             CreateThread(PersistentTrackingLoop)
@@ -1874,7 +1828,7 @@ function PersistentTrackingLoop()
         PersistentTracking.RenderLoopRunning = true
         CreateThread(PersistentTrackingRenderLoop)
     end
-    
+
     while PersistentTracking.Active or PolCam.Active do
         if PolCam.Active then
             Wait(500)
@@ -1911,7 +1865,7 @@ function PersistentTrackingLoop()
                             local dz = heliPos.z - targetPos.z
                             local distSq = dx*dx + dy*dy + dz*dz
                             local maxDistSq = PersistentTracking.MaxDistance * PersistentTracking.MaxDistance
-                            
+
                             if distSq > maxDistSq then
                                 ClearLock()
                                 PlayPolCamSound("TargetLost")
@@ -1953,8 +1907,6 @@ function PersistentTrackingRenderLoop()
             local ped = PlayerPedId()
             local currentVeh = GetVehiclePedIsIn(ped, false)
 
-            -- If the player leaves the helicopter, immediately clear the lock/UI instead of
-            -- keeping the world label on screen until another loop catches up.
             if currentVeh == 0 or not DoesEntityExist(currentVeh) then
                 ClearLock()
                 PersistentTracking.Active = false

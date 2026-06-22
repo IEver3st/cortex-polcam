@@ -1,11 +1,3 @@
---[[
-    PolCam - Server Script
-    Handles POI synchronization and spotlight sync across clients
-]]
-
--- ============================================================================
--- NATIVE CACHING (Performance Optimization)
--- ============================================================================
 local GetPlayerPed = GetPlayerPed
 local GetVehiclePedIsIn = GetVehiclePedIsIn
 local GetPedInVehicleSeat = GetPedInVehicleSeat
@@ -32,41 +24,23 @@ local tostring = tostring
 local type = type
 local table_sort = table.sort
 
--- ============================================================================
--- POI STORAGE
--- ============================================================================
 local ServerPOIs = {}
 
--- ============================================================================
--- CAMERA LOCK (Per Helicopter)
--- ============================================================================
-local ActiveHeliCameras = {} -- vehicleNetId -> ownerSource
-local CameraWaitlists = {} -- vehicleNetId -> { [src] = lastRequestMs }
+local ActiveHeliCameras = {}
+local CameraWaitlists = {}
 
--- ============================================================================
--- SHARED CAMERA STATE (Per Helicopter)
--- ============================================================================
--- Stores the camera state per helicopter so operators can seamlessly hand off.
--- When operator A exits, operator B can continue exactly where A left off.
-local SharedCameraState = {} -- vehicleNetId -> {heading, pitch, zoom, targetZoom, visionMode, lockedTargetNetId, lockedTargetType, groundLockPoint, lastUpdate}
+local SharedCameraState = {}
 
--- ============================================================================
--- SPOTLIGHT STORAGE
--- ============================================================================
--- NOTE: This is keyed by the camera "instance" (helicopter net id), not player.
--- That way only one spotlight can exist per helicopter, and when one operator
--- exits the camera another operator can take over the same instance.
-local ActiveSpotlights = {} -- vehicleNetId -> {active, radius, color, owner, heliCoords, groundCoords, targetNetId, trackingTarget}
-local HeliTracking = {} -- vehicleNetId -> {active, targetNetId, targetType, ownerSrc, seq}
-local ActiveAirFeeds = {} -- vehicleNetId -> feed state
-local ActiveRappels = {} -- playerId -> {startTime, vehicleNetId, altitude, model}
-local SyncedMarkers = {} -- markerId -> {coords, type, creator, vehicleNetId, visibleTo}
+local ActiveSpotlights = {}
+local HeliTracking = {}
+local ActiveAirFeeds = {}
+local ActiveRappels = {}
+local SyncedMarkers = {}
 
 local AIR_FEED_STALE_MS = 1200
 local AIR_FEED_MAINTENANCE_INTERVAL_MS = 250
 local AIR_FEED_ID_PREFIX = 'air:'
 
--- Forward declarations for functions referenced before their definitions.
 local BroadcastHeliTracking
 local ClearHeliTracking
 
@@ -381,15 +355,13 @@ exports('GetActiveAirFeeds', GetActiveAirFeeds)
 exports('GetAirFeedById', GetAirFeedById)
 exports('GetTrackedDatalinkTargets', GetTrackedDatalinkTargets)
 
--- Rate limiting to prevent "Reliable network event overflow"
-local LastSpotlightBroadcastAt = {} -- vehicleNetId -> ms
-local LastSpotlightPositionAt = {} -- vehicleNetId -> ms
-local LastSpotlightRadiusAt = {} -- vehicleNetId -> ms
+local LastSpotlightBroadcastAt = {}
+local LastSpotlightPositionAt = {}
+local LastSpotlightRadiusAt = {}
 
--- Tracking request rate limiting (per-player, per-event)
-local LastTrackingStartAt = {} -- src -> ms
-local LastTrackingStopAt = {} -- src -> ms
-local LastTrackingStateAt = {} -- src -> ms
+local LastTrackingStartAt = {}
+local LastTrackingStopAt = {}
+local LastTrackingStateAt = {}
 
 local function RateLimitTracking(src, eventName, now)
     local minIntervalMs = 0
@@ -460,72 +432,53 @@ local function MaybeBroadcastSpotlight(vehicleNetId)
     TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, ActiveSpotlights[vehicleNetId])
 end
 
--- ============================================================================
--- POI CREATION
--- ============================================================================
 RegisterNetEvent('polcam:createPOI')
 AddEventHandler('polcam:createPOI', function(poi)
     local source = source
 
-    -- Validate POI data
     if not poi or not poi.id or not poi.coords then
         return
     end
-    
-    -- Add server timestamp
+
     poi.serverTime = os.time()
     poi.creator = source
-    
-    -- Store POI
+
     ServerPOIs[poi.id] = poi
-    
-    -- Broadcast to all clients
+
     TriggerClientEvent('polcam:receivePOI', -1, poi)
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print("[PolCam] POI created by player " .. source .. ": " .. poi.id)
     end
 end)
 
--- ============================================================================
--- POI REMOVAL
--- ============================================================================
 RegisterNetEvent('polcam:removePOI')
 AddEventHandler('polcam:removePOI', function(poiId)
     local source = source
-    
-    -- Check if POI exists and if source is the creator
+
     local poi = ServerPOIs[poiId]
     if poi and poi.creator == source then
         ServerPOIs[poiId] = nil
-        
-        -- Broadcast removal to all clients
+
         TriggerClientEvent('polcam:poiRemoved', -1, poiId)
-        
+
         if Config and Config.Debug and Config.Debug.Enabled then
             print("[PolCam] POI removed by player " .. source .. ": " .. poiId)
         end
     end
 end)
 
--- ============================================================================
--- POI SYNC REQUEST
--- ============================================================================
 RegisterNetEvent('polcam:requestPOIs')
 AddEventHandler('polcam:requestPOIs', function()
     local source = source
-    
-    -- Send all current POIs to the requesting client
+
     TriggerClientEvent('polcam:syncAllPOIs', source, ServerPOIs)
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print("[PolCam] Synced POIs to player " .. source)
     end
 end)
 
--- ============================================================================
--- CAMERA CLAIM/RELEASE (Per Helicopter)
--- ============================================================================
 local function PickNextCameraOwner(vehicleNetId, excludingSrc)
     local waitlist = CameraWaitlists[vehicleNetId]
     if not waitlist then return nil end
@@ -543,18 +496,12 @@ end
 
 local function HandoffCamera(vehicleNetId, oldOwner)
     DebugLog("[PolCam Server DEBUG] HandoffCamera called - vehicleNetId: " .. tostring(vehicleNetId) .. ", oldOwner: " .. tostring(oldOwner))
-    
-    -- NOTE: Tracking is now per-helicopter and persists through handoffs.
-    -- We do NOT clear tracking here - it transfers to the new owner.
 
     local nextOwner = PickNextCameraOwner(vehicleNetId, oldOwner)
     if not nextOwner then
-        -- No next owner waiting - the old owner may re-enter the camera shortly
-        -- Do NOT send forceReleaseAll here - the client already deactivated their camera
-        -- and we want them to be able to resume seamlessly
+
         DebugLog("[PolCam Server DEBUG] No next owner in waitlist, skipping forceReleaseAll")
-        
-        -- Clear spotlight from this helicopter since no one is operating it
+
         local spotlight = ActiveSpotlights[vehicleNetId]
         if spotlight and spotlight.owner == oldOwner then
             ActiveSpotlights[vehicleNetId] = nil
@@ -563,12 +510,10 @@ local function HandoffCamera(vehicleNetId, oldOwner)
             LastSpotlightRadiusAt[vehicleNetId] = nil
             TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, nil)
         end
-        -- Tracking persists for remaining heli occupants even without camera operator
+
         return
     end
 
-    -- There IS a next owner waiting - tell old owner to release their local state
-    -- so the new owner can take over cleanly
     TriggerClientEvent('polcam:forceReleaseAll', oldOwner)
     DebugLog("[PolCam Server DEBUG] Sent polcam:forceReleaseAll to oldOwner: " .. tostring(oldOwner))
 
@@ -576,22 +521,20 @@ local function HandoffCamera(vehicleNetId, oldOwner)
     CameraWaitlists[vehicleNetId] = nil
 
     TriggerClientEvent('polcam:cameraClaimResult', nextOwner, true)
-    
-    -- Send the shared camera state to the new owner so they can continue seamlessly
+
     local sharedState = SharedCameraState[vehicleNetId]
     if sharedState then
         TriggerClientEvent('polcam:receiveCameraState', nextOwner, vehicleNetId, sharedState)
-        
+
         if Config and Config.Debug and Config.Debug.Enabled then
             print(string.format("[PolCam] Handed off camera state for heli %d from player %d to player %d", vehicleNetId, oldOwner, nextOwner))
         end
     end
 
-    -- Transfer tracking ownership to new owner if tracking is active
     local tracking = HeliTracking[vehicleNetId]
     if tracking and tracking.active then
         tracking.ownerSrc = nextOwner
-        -- Broadcast so all occupants know tracking transferred
+
         BroadcastHeliTracking(vehicleNetId)
         DebugLog("[PolCam Server DEBUG] Transferred tracking ownership to new owner: " .. tostring(nextOwner))
     end
@@ -601,7 +544,6 @@ local function HandoffCamera(vehicleNetId, oldOwner)
         spotlight.owner = nextOwner
         TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, spotlight)
 
-        -- Ask new owner to ensure their local spotlight is enabled (without creating a new instance)
         TriggerClientEvent('polcam:spotlightEnsureOn', nextOwner, spotlight.radius, spotlight.color)
     end
 end
@@ -622,7 +564,6 @@ AddEventHandler('polcam:cameraClaim', function(vehicleNetId)
         return
     end
 
-    -- Someone else owns it: remember interest for auto-handoff.
     CameraWaitlists[vehicleNetId] = CameraWaitlists[vehicleNetId] or {}
     CameraWaitlists[vehicleNetId][src] = GetGameTimer()
 
@@ -668,7 +609,6 @@ local function HandlePlayerDropped(src)
         end
     end
 
-    -- Remove any spotlight instance owned by this player
     for vehicleNetId, spotlight in pairs(ActiveSpotlights) do
         if spotlight and spotlight.owner == src then
             ActiveSpotlights[vehicleNetId] = nil
@@ -679,11 +619,9 @@ local function HandlePlayerDropped(src)
         end
     end
 
-    -- Handle per-heli tracking cleanup
-    -- Only clear tracking if heli becomes empty (no other occupants)
     for vehicleNetId, tracking in pairs(HeliTracking) do
         if tracking and tracking.ownerSrc == src then
-            -- Check if anyone else is still in this heli
+
             local hasOtherOccupants = false
             local players = GetPlayers()
             for _, playerId in ipairs(players) do
@@ -704,7 +642,7 @@ local function HandlePlayerDropped(src)
             end
 
             if hasOtherOccupants then
-                -- Transfer tracking to another occupant (pick any)
+
                 for _, playerId in ipairs(players) do
                     local playerSrc = tonumber(playerId)
                     if playerSrc and playerSrc ~= src then
@@ -724,7 +662,7 @@ local function HandlePlayerDropped(src)
                     end
                 end
             else
-                -- Heli is empty, clear tracking
+
                 ClearHeliTracking(vehicleNetId)
                 HeliTracking[vehicleNetId] = nil
                 DebugLog("[PolCam Server DEBUG] Cleared HeliTracking for empty heli: " .. tostring(vehicleNetId))
@@ -732,12 +670,10 @@ local function HandlePlayerDropped(src)
         end
     end
 
-    -- Remove rappel state when player disconnects
     if ActiveRappels[src] then
         ActiveRappels[src] = nil
     end
 
-    -- Remove synced markers created by this player
     for id, marker in pairs(SyncedMarkers or {}) do
         if type(marker) == 'table' and marker.creator == src then
             SyncedMarkers[id] = nil
@@ -745,24 +681,16 @@ local function HandlePlayerDropped(src)
         end
     end
 
-    -- Note: We DO NOT clear SharedCameraState here - it should persist
-    -- so that another passenger can take over the camera with the same state
 end
 
--- ============================================================================
--- SHARED CAMERA STATE SYNC
--- ============================================================================
--- Receive continuous camera state updates from the active operator
 RegisterNetEvent('polcam:cameraStateSync')
 AddEventHandler('polcam:cameraStateSync', function(vehicleNetId, state)
     local src = source
     if not vehicleNetId then return end
     if type(state) ~= 'table' then return end
-    
-    -- Only accept updates from the current camera owner
+
     if ActiveHeliCameras[vehicleNetId] ~= src then return end
-    
-    -- Store/update shared state
+
     SharedCameraState[vehicleNetId] = {
         heading = state.heading,
         pitch = state.pitch,
@@ -775,39 +703,37 @@ AddEventHandler('polcam:cameraStateSync', function(vehicleNetId, state)
         lastUpdate = GetGameTimer(),
         lastOwner = src
     }
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print(string.format("[PolCam] Camera state synced for heli %d by player %d", vehicleNetId, src))
     end
 end)
 
--- Client requests current shared state when taking over camera
 RegisterNetEvent('polcam:requestCameraState')
 AddEventHandler('polcam:requestCameraState', function(vehicleNetId)
     local src = source
     if not vehicleNetId then return end
-    
+
     local state = SharedCameraState[vehicleNetId]
     if state then
         TriggerClientEvent('polcam:receiveCameraState', src, vehicleNetId, state)
-        
+
         if Config and Config.Debug and Config.Debug.Enabled then
             print(string.format("[PolCam] Sent camera state for heli %d to player %d", vehicleNetId, src))
         end
     else
-        -- No existing state, send nil so client uses defaults
+
         TriggerClientEvent('polcam:receiveCameraState', src, vehicleNetId, nil)
     end
 end)
 
--- Clear shared state when helicopter is abandoned (no occupants) or after timeout
 local function CleanupStaleStates()
     local now = GetGameTimer()
     local staleThreshold = (Config and Config.SharedCamera and Config.SharedCamera.StateTimeoutMs) or 300000
-    
+
     for vehicleNetId, state in pairs(SharedCameraState) do
         if state.lastUpdate and (now - state.lastUpdate) > staleThreshold then
-            -- No one has used this camera in 5 minutes, clear it
+
             SharedCameraState[vehicleNetId] = nil
             if Config and Config.Debug and Config.Debug.Enabled then
                 print(string.format("[PolCam] Cleared stale camera state for heli %d", vehicleNetId))
@@ -816,9 +742,6 @@ local function CleanupStaleStates()
     end
 end
 
--- ============================================================================
--- SPOTLIGHT SYNC
--- ============================================================================
 RegisterNetEvent('polcam:spotlightSync')
 AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCoords, initialHeliCoords, color)
     local src = source
@@ -828,22 +751,18 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
     if not vehicleNetId then return end
 
     if active then
-        -- Enforce single spotlight per helicopter; supersede any previous owner.
-        -- Use provided initial coords, or fall back to existing coords if available
+
         local existingSpotlight = ActiveSpotlights[vehicleNetId]
-        
-        -- If there was a previous owner and it's not us, tell them to release spotlight
-        -- NOTE: Tracking is NOT cleared here - it's per-heli and persists
+
         if existingSpotlight and existingSpotlight.owner and existingSpotlight.owner ~= src then
             local oldOwner = existingSpotlight.owner
             TriggerClientEvent('polcam:forceReleaseAll', oldOwner)
         end
-        
-        -- Preserve tracking info from existing spotlight or from HeliTracking
+
         local tracking = HeliTracking[vehicleNetId]
         local targetNetId = (existingSpotlight and existingSpotlight.targetNetId) or (tracking and tracking.targetNetId) or nil
         local trackingTarget = (existingSpotlight and existingSpotlight.trackingTarget) or (tracking and tracking.active) or false
-        
+
         ActiveSpotlights[vehicleNetId] = {
             active = true,
             radius = radius or 5.0,
@@ -855,7 +774,7 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
             targetNetId = targetNetId,
             trackingTarget = trackingTarget
         }
-        -- Reset rate limit so first position update goes through immediately
+
         LastSpotlightPositionAt[vehicleNetId] = nil
     else
         local existing = ActiveSpotlights[vehicleNetId]
@@ -867,7 +786,6 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
         end
     end
 
-    -- This is a state change, so broadcast immediately.
     TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, ActiveSpotlights[vehicleNetId])
 end)
 
@@ -909,7 +827,6 @@ AddEventHandler('polcam:spotlightColor', function(color)
     end
 end)
 
--- Handle spotlight position/ground coord updates
 RegisterNetEvent('polcam:spotlightPosition')
 AddEventHandler('polcam:spotlightPosition', function(groundCoords, heliCoords)
     local src = source
@@ -948,12 +865,6 @@ AddEventHandler('polcam:spotlightPosition', function(groundCoords, heliCoords)
     end
 end)
 
--- ============================================================================
--- TARGET TRACKING SYNC (Per Helicopter - Unified)
--- ============================================================================
--- Tracking is now per-helicopter, not per-player. Anyone in the heli can start/stop.
--- Last one wins for new targets. Tracking persists through camera handoffs.
-
 local function IsVehicleOccupiedByAnyPlayer(vehicleNetId)
     if not vehicleNetId then return false end
 
@@ -977,23 +888,22 @@ local function IsVehicleOccupiedByAnyPlayer(vehicleNetId)
     return false
 end
 
--- Broadcast tracking state to ALL players in the same helicopter
 BroadcastHeliTracking = function(vehicleNetId)
-    if not vehicleNetId then 
+    if not vehicleNetId then
         if Config and Config.Debug and Config.Debug.Enabled then
             print("[PolCam Server DEBUG] BroadcastHeliTracking: vehicleNetId is nil, aborting")
         end
-        return 
+        return
     end
-    
+
     local state = HeliTracking[vehicleNetId] or { active = false, seq = 0 }
     state.vehicleNetId = vehicleNetId
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print("[PolCam Server DEBUG] BroadcastHeliTracking - vehicleNetId: " .. tostring(vehicleNetId))
         print("[PolCam Server DEBUG] State to broadcast - active: " .. tostring(state.active) .. ", seq: " .. tostring(state.seq))
     end
-    
+
     local players = GetPlayers()
     local sentCount = 0
     for _, playerId in ipairs(players) do
@@ -1008,7 +918,7 @@ BroadcastHeliTracking = function(vehicleNetId)
                         print("[PolCam Server DEBUG] Checking player " .. tostring(playerSrc) .. " - playerVehNetId: " .. tostring(playerVehNetId))
                     end
                     if playerVehNetId == vehicleNetId then
-                        -- This player is in the same helicopter, send them the tracking state
+
                         TriggerClientEvent('polcam:heliTrackingState', playerSrc, vehicleNetId, state)
                         sentCount = sentCount + 1
                         if Config and Config.Debug and Config.Debug.Enabled then
@@ -1019,7 +929,7 @@ BroadcastHeliTracking = function(vehicleNetId)
             end
         end
     end
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print("[PolCam Server DEBUG] BroadcastHeliTracking complete - sent to " .. tostring(sentCount) .. " players")
     end
@@ -1250,7 +1160,6 @@ local function SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
     BroadcastHeliTracking(vehicleNetId)
 end
 
--- Client requests tracking start (server authoritative). Last request wins.
 RegisterNetEvent('polcam:trackingRequestStart')
 AddEventHandler('polcam:trackingRequestStart', function(targetNetId, targetType)
     local src = source
@@ -1267,7 +1176,6 @@ AddEventHandler('polcam:trackingRequestStart', function(targetNetId, targetType)
     SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
 end)
 
--- Client requests tracking stop (server authoritative).
 RegisterNetEvent('polcam:trackingRequestStop')
 AddEventHandler('polcam:trackingRequestStop', function()
     local src = source
@@ -1289,25 +1197,23 @@ AddEventHandler('polcam:trackingRequestStop', function()
 
     local tracking = HeliTracking[vehicleNetId]
     if tracking and tracking.ownerSrc and tracking.ownerSrc ~= src then
-        -- Last-one-wins: allow stop from any occupant, but ensure they are actually in the heli.
-        -- (vehicleNetId check above already guarantees same heli).
+
     end
 
     ClearHeliTracking(vehicleNetId)
 end)
 
--- Handle direct tracking sync from client (used by CompleteLock/ClearLock)
 RegisterNetEvent('polcam:trackingSync')
 AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
     local src = source
     local now = GetGameTimer()
-    
+
     local ped = GetPlayerPed(src)
     local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
     if not vehicle or vehicle == 0 then
         return
     end
-    
+
     local vehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
     if not vehicleNetId then
         return
@@ -1337,7 +1243,6 @@ AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
     end
 end)
 
--- Client can request current tracking state for a heli.
 RegisterNetEvent('polcam:trackingRequestState')
 AddEventHandler('polcam:trackingRequestState', function(vehicleNetId)
     local src = source
@@ -1348,7 +1253,6 @@ AddEventHandler('polcam:trackingRequestState', function(vehicleNetId)
 
     if type(vehicleNetId) ~= 'number' then return end
 
-    -- Only allow requesting state for the heli the player is currently in.
     local ped = GetPlayerPed(src)
     local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
     if not vehicle or vehicle == 0 then
@@ -1365,7 +1269,6 @@ AddEventHandler('polcam:trackingRequestState', function(vehicleNetId)
     TriggerClientEvent('polcam:heliTrackingState', src, vehicleNetId, state)
 end)
 
--- Handle tracking position updates (for persistent tracking)
 RegisterNetEvent('polcam:trackingPosition')
 AddEventHandler('polcam:trackingPosition', function(targetCoords, heliCoords, targetNetId)
     local src = source
@@ -1382,7 +1285,7 @@ AddEventHandler('polcam:trackingPosition', function(targetCoords, heliCoords, ta
         if (now - lastPos) < posInterval then
             return
         end
-        
+
         LastSpotlightPositionAt[vehicleNetId] = now
         spotlight.groundCoords = targetCoords
         spotlight.heliCoords = heliCoords
@@ -1392,22 +1295,17 @@ AddEventHandler('polcam:trackingPosition', function(targetCoords, heliCoords, ta
     end
 end)
 
--- ============================================================================
--- RAPPEL SYNC
--- ============================================================================
--- Handle rappel start
 RegisterNetEvent('polcam:rappelStart')
 AddEventHandler('polcam:rappelStart', function(data)
     local source = source
-    
+
     ActiveRappels[source] = {
         startTime = GetGameTimer(),
         vehicleNetId = data.vehicle,
         altitude = data.altitude,
         model = data.model
     }
-    
-    -- Broadcast to all clients for visual sync
+
     TriggerClientEvent('polcam:syncRappel', -1, {
         source = source,
         vehicle = data.vehicle,
@@ -1415,45 +1313,38 @@ AddEventHandler('polcam:rappelStart', function(data)
         model = data.model,
         action = 'start'
     })
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print(string.format("[PolCam] Player %d started rappeling from %.0f ft", source, data.altitude or 0))
     end
 end)
 
-
--- Handle rappel end
 RegisterNetEvent('polcam:rappelEnd')
 AddEventHandler('polcam:rappelEnd', function(data)
     local source = source
-    
+
     if ActiveRappels[source] then
         local duration = (GetGameTimer() - (ActiveRappels[source].startTime or 0)) / 1000
         ActiveRappels[source] = nil
-        
-        -- Broadcast completion to all clients
+
         TriggerClientEvent('polcam:syncRappel', -1, {
             source = source,
             action = 'end',
             duration = duration
         })
-        
+
         if Config and Config.Debug and Config.Debug.Enabled then
             print(string.format("[PolCam] Player %d finished rappeling (%.1fs)", source, duration))
         end
     end
 end)
 
--- ============================================================================
--- SYNCED MARKERS (Shared between helicopter crew)
--- ============================================================================
--- Create a synced marker visible to players in the same helicopter
 RegisterNetEvent('polcam:createSyncedMarker')
 AddEventHandler('polcam:createSyncedMarker', function(markerData)
     local source = source
     local ped = GetPlayerPed(source)
     local vehicle = GetVehiclePedIsIn(ped, false)
-    
+
     if vehicle == 0 then return end
     if not DoesEntityExist(vehicle) then return end
 
@@ -1463,7 +1354,7 @@ AddEventHandler('polcam:createSyncedMarker', function(markerData)
     SyncedMarkers = SyncedMarkers or {}
 
     local markerId = markerData.id or tostring(source) .. '_' .. tostring(GetGameTimer())
-    
+
     SyncedMarkers[markerId] = {
         id = markerId,
         coords = markerData.coords,
@@ -1473,16 +1364,14 @@ AddEventHandler('polcam:createSyncedMarker', function(markerData)
         vehicleNetId = vehicleNetId,
         createdAt = GetGameTimer()
     }
-    
-    -- Broadcast to all clients - they will filter based on vehicle
+
     TriggerClientEvent('polcam:receiveSyncedMarker', -1, SyncedMarkers[markerId])
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print(string.format("[PolCam] Synced marker created by player %d", source))
     end
 end)
 
--- Remove a synced marker
 RegisterNetEvent('polcam:removeSyncedMarker')
 AddEventHandler('polcam:removeSyncedMarker', function(markerId)
     local source = source
@@ -1496,7 +1385,6 @@ AddEventHandler('polcam:removeSyncedMarker', function(markerId)
     end
 end)
 
--- Request all synced markers for a vehicle
 RegisterNetEvent('polcam:requestSyncedMarkers')
 AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
     local source = source
@@ -1509,13 +1397,10 @@ AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
             vehicleMarkers[id] = marker
         end
     end
-    
+
     TriggerClientEvent('polcam:syncAllMarkers', source, vehicleMarkers)
 end)
 
--- ============================================================================
--- AIR FEED MAINTENANCE
--- ============================================================================
 CreateThread(function()
     while true do
         MaintainAirFeeds()
@@ -1523,38 +1408,31 @@ CreateThread(function()
     end
 end)
 
--- ============================================================================
--- POI CLEANUP (Expired POIs) & CAMERA STATE CLEANUP
--- ============================================================================
 CreateThread(function()
     while true do
-        Wait(60000) -- Check every minute
-        
+        Wait(60000)
+
         local currentTime = os.time()
         local expiryTime = Config and Config.POI and Config.POI.ExpiryTime or 300
-        
+
         if expiryTime > 0 then
             for id, poi in pairs(ServerPOIs) do
                 local age = currentTime - (poi.serverTime or 0)
                 if age > expiryTime then
                     ServerPOIs[id] = nil
                     TriggerClientEvent('polcam:poiRemoved', -1, id)
-                    
+
                     if Config and Config.Debug and Config.Debug.Enabled then
                         print("[PolCam] POI expired: " .. id)
                     end
                 end
             end
         end
-        
-        -- Clean up stale camera states
+
         CleanupStaleStates()
     end
 end)
 
--- ============================================================================
--- TRACKING CLEANUP (Hard clear when heli empty)
--- ============================================================================
 CreateThread(function()
     while true do
         Wait(1000)
@@ -1574,19 +1452,13 @@ CreateThread(function()
     end
 end)
 
--- ============================================================================
--- PLAYER DISCONNECT CLEANUP
--- ============================================================================
 AddEventHandler('playerDropped', function()
     HandlePlayerDropped(source)
 end)
 
--- ============================================================================
--- RESOURCE START
--- ============================================================================
 AddEventHandler('onResourceStart', function(resourceName)
     if GetCurrentResourceName() ~= resourceName then return end
-    
+
     if Config and Config.Debug and Config.Debug.Enabled then
         print("[PolCam] Server-side initialized")
         print("[PolCam] POI and spotlight synchronization active")

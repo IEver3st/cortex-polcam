@@ -2,7 +2,7 @@ fx_version 'cerulean'
 game 'gta5'
 lua54 'yes'
 
-name 'polcam'
+name 'Cortex_PolCam'
 description 'Cortex PolCam - Police Helicopter Camera System'
 author 'Cortex PolCam'
 version '1.0.0'
