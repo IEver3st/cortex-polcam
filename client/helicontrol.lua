@@ -35,35 +35,35 @@ local function CheckAvionicsHealth(heli)
     if not heli or not DoesEntityExist(heli) then
         return false
     end
-    
+
     local engineHealth = GetVehicleEngineHealth(heli)
     local bodyHealth = GetVehicleBodyHealth(heli)
     local engineOn = IsVehicleEngineOn(heli)
-    
+
     local minEngineHealth = (Config.HeliControl and Config.HeliControl.MinEngineHealth) or 100.0
     local minBodyHealth = (Config.HeliControl and Config.HeliControl.MinBodyHealth) or 100.0
-    
+
     if not engineOn then
         if Config.Debug and Config.Debug.Enabled then
             print("[PolCam] Avionics check failed: Engine is off")
         end
         return false
     end
-    
+
     if engineHealth < minEngineHealth then
         if Config.Debug and Config.Debug.Enabled then
             print("[PolCam] Avionics check failed: Engine health " .. engineHealth .. " < " .. minEngineHealth)
         end
         return false
     end
-    
+
     if bodyHealth < minBodyHealth then
         if Config.Debug and Config.Debug.Enabled then
             print("[PolCam] Avionics check failed: Body health " .. bodyHealth .. " < " .. minBodyHealth)
         end
         return false
     end
-    
+
     return true
 end
 
@@ -80,7 +80,6 @@ local function ShowAvionicsDamagedNotification()
         end
     end
 end
-
 
 local HeliControl = {
     HoverMode = false,
@@ -207,10 +206,10 @@ end
 
 function ActivateHover()
     if HeliControl.HoverMode then return end
-    
+
     local heli = PolCam.CurrentVehicle
     local ped = PlayerPedId()
-    
+
     if not CheckAvionicsHealth(heli) then
         ShowAvionicsDamagedNotification()
         if Config.Debug and Config.Debug.Enabled then
@@ -218,20 +217,20 @@ function ActivateHover()
         end
         return
     end
-    
+
     HeliControl.HoverCoords = GetEntityCoords(heli)
     HeliControl.HoverHeading = GetEntityHeading(heli)
-    
+
     HeliControl.HoverMode = true
     HeliControl.OrbitMode = false
-    
+
     HeliControl.HoverTargetZ = HeliControl.HoverCoords.z
     HeliControl.HoverAltitudeDisplay = FormatAltitude(HeliControl.HoverTargetZ)
-    
+
     if PlayPolCamSound then
         PlayPolCamSound("HoverOn")
     end
-    
+
     SendNUIMessage({
         action = "hoverOn"
     })
@@ -241,7 +240,7 @@ function ActivateHover()
         active = true,
         altitude = HeliControl.HoverAltitudeDisplay
     })
-    
+
     if Config.Debug.Enabled then
         print("[PolCam] Hover mode activated at " .. tostring(HeliControl.HoverCoords))
     end
@@ -249,18 +248,18 @@ end
 
 function DeactivateHover()
     if not HeliControl.HoverMode then return end
-    
+
     local ped = PlayerPedId()
-    
+
     HeliControl.HoverMode = false
     HeliControl.OrbitMode = false
-    
+
     ClearPedTasks(ped)
-    
+
     if PlayPolCamSound then
         PlayPolCamSound("HoverOff")
     end
-    
+
     SendNUIMessage({
         action = "hoverOff"
     })
@@ -270,9 +269,9 @@ function DeactivateHover()
         active = false,
         altitude = nil
     })
-    
+
     HeliControl.HoverAltitudeDisplay = nil
-    
+
     if Config.Debug.Enabled then
         print("[PolCam] Hover mode deactivated")
     end
@@ -288,14 +287,14 @@ function ToggleOrbitMode()
         end
         PolCam.CurrentVehicle = vehicle
     end
-    
+
     local ped = PlayerPedId()
     local driver = GetPedInVehicleSeat(PolCam.CurrentVehicle, -1)
-    
+
     if driver ~= ped then
         return
     end
-    
+
     if HeliControl.OrbitMode then
         DeactivateOrbit()
     else
@@ -305,11 +304,11 @@ end
 
 function ActivateOrbit()
     if HeliControl.OrbitMode then return end
-    
+
     local heli = PolCam.CurrentVehicle
     local ped = PlayerPedId()
     local heliCoords = GetEntityCoords(heli)
-    
+
     if not CheckAvionicsHealth(heli) then
         ShowAvionicsDamagedNotification()
         if Config.Debug and Config.Debug.Enabled then
@@ -317,39 +316,39 @@ function ActivateOrbit()
         end
         return
     end
-    
+
     if PolCam.LockedTarget and DoesEntityExist(PolCam.LockedTarget) then
         HeliControl.OrbitCenter = GetEntityCoords(PolCam.LockedTarget)
     else
         HeliControl.OrbitCenter = PolCam.GroundCoords
     end
-    
+
     local dx = heliCoords.x - HeliControl.OrbitCenter.x
     local dy = heliCoords.y - HeliControl.OrbitCenter.y
     HeliControl.OrbitRadius = math.sqrt(dx * dx + dy * dy)
-    
+
     if HeliControl.OrbitRadius < Config.HeliControl.MinOrbitRadius then
         HeliControl.OrbitRadius = Config.HeliControl.MinOrbitRadius
     end
-    
+
     HeliControl.OrbitAltitude = heliCoords.z
     HeliControl.HoverTargetZ = HeliControl.OrbitAltitude
     HeliControl.OrbitAngle = math.atan(dy, dx)
     HeliControl.OrbitAngularSpeed = (HeliControl.OrbitSpeed or 15.0) / HeliControl.OrbitRadius
     HeliControl.OrbitLastTick = GetGameTimer()
     HeliControl.OrbitDirection = 1
-    
+
     HeliControl.OrbitMode = true
     HeliControl.HoverMode = true
-    
+
     if PlayPolCamSound then
         PlayPolCamSound("OrbitOn")
     end
-    
+
     SendNUIMessage({
         action = "orbitOn"
     })
-    
+
     if Config.Debug.Enabled then
         print("[PolCam] Orbit mode activated - radius: " .. HeliControl.OrbitRadius)
     end
@@ -357,28 +356,28 @@ end
 
 function DeactivateOrbit()
     if not HeliControl.OrbitMode then return end
-    
+
     local ped = PlayerPedId()
-    
+
     HeliControl.OrbitMode = false
     HeliControl.OrbitAngle = nil
     HeliControl.OrbitAngularSpeed = 0
     HeliControl.OrbitLastTick = 0
-    
+
     if HeliControl.HoverMode then
         DeactivateHover()
     else
         ClearPedTasks(ped)
     end
-    
+
     if PlayPolCamSound then
         PlayPolCamSound("OrbitOff")
     end
-    
+
     SendNUIMessage({
         action = "orbitOff"
     })
-    
+
     if Config.Debug.Enabled then
         print("[PolCam] Orbit mode deactivated")
     end
@@ -388,11 +387,11 @@ CreateThread(function()
     while true do
         local wait = 500
         local currentTime = GetGameTimer()
-        
+
         if HeliControl.HoverMode and not HeliControl.OrbitMode then
             local ped = PlayerPedId()
             local heli = PolCam.CurrentVehicle
-            
+
             if heli and DoesEntityExist(heli) and GetPedInVehicleSeat(heli, -1) == ped and GetVehicleClass(heli) == 15 then
                 if not CheckAvionicsHealth(heli) then
                     ShowAvionicsDamagedNotification()
@@ -402,7 +401,7 @@ CreateThread(function()
                     end
                 else
                     wait = 5
-                    
+
                     local coords = GetEntityCoords(heli)
                     local velocity = GetEntityVelocity(heli)
 
@@ -423,7 +422,7 @@ CreateThread(function()
                 end
             end
         end
-        
+
         Wait(wait)
     end
 end)
@@ -615,7 +614,7 @@ function CleanupHeliControl()
         local ped = PlayerPedId()
         ClearPedTasks(ped)
     end
-    
+
     HeliControl.HoverMode = false
     HeliControl.OrbitMode = false
 end

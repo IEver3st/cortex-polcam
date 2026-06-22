@@ -1,14 +1,8 @@
-/* ============================================================================
-   PolCam HUD Stylesheet
-   Realistic FLIR-Style Police Helicopter Camera Interface
-   Scales properly for 1080p, 1440p, and 4K
-   ============================================================================ */
 
-/* --------------------------------------------------------------------------
-   CSS Variables / Design Tokens
-   -------------------------------------------------------------------------- */
+
+
 :root {
-    /* Default white HUD color */
+    
     --hud-color: #ffffff;
     --hud-glow: rgba(255, 255, 255, 0.4);
     --hud-dim: rgba(200, 200, 200, 0.8);
@@ -22,18 +16,18 @@
 
     --text-shadow: 0 0 4px var(--hud-glow);
 
-    /* Base scaling unit */
+    
     --scale: 1vmin;
 }
 
-/* Night Vision Theme */
+
 .nightvision {
     --hud-color: #ccffcc;
     --hud-glow: rgba(200, 255, 200, 0.4);
     --hud-dim: rgba(180, 220, 180, 0.8);
 }
 
-/* High Contrast - Green Theme */
+
 .highcontrast-green {
     --hud-color: #00ff00;
     --hud-glow: rgba(0, 255, 0, 0.6);
@@ -41,7 +35,7 @@
     --hud-bg: rgba(0, 0, 0, 0.7);
 }
 
-/* High Contrast - Black Theme */
+
 .highcontrast-black {
     --hud-color: #000000;
     --hud-glow: rgba(0, 0, 0, 0.4);
@@ -49,7 +43,7 @@
     --hud-bg: rgba(255, 255, 255, 0.3);
 }
 
-/* High Contrast - Orange Theme */
+
 .highcontrast-orange {
     --hud-color: #ffaa00;
     --hud-glow: rgba(255, 170, 0, 0.6);
@@ -57,7 +51,7 @@
     --hud-bg: rgba(0, 0, 0, 0.7);
 }
 
-/* High Contrast - Red Theme */
+
 .highcontrast-red {
     --hud-color: #ff0000;
     --hud-glow: rgba(255, 0, 0, 0.6);
@@ -65,7 +59,7 @@
     --hud-bg: rgba(0, 0, 0, 0.7);
 }
 
-/* High Contrast - Purple Theme */
+
 .highcontrast-purple {
     --hud-color: #bf00ff;
     --hud-glow: rgba(191, 0, 255, 0.6);
@@ -73,7 +67,7 @@
     --hud-bg: rgba(0, 0, 0, 0.7);
 }
 
-/* High Contrast - Blue Theme */
+
 .highcontrast-blue {
     --hud-color: #0088ff;
     --hud-glow: rgba(0, 136, 255, 0.6);
@@ -81,7 +75,7 @@
     --hud-bg: rgba(0, 0, 0, 0.7);
 }
 
-/* High Contrast - Pink Theme */
+
 .highcontrast-pink {
     --hud-color: #ff00ff;
     --hud-glow: rgba(255, 0, 255, 0.6);
@@ -90,9 +84,7 @@
 }
 
 
-/* --------------------------------------------------------------------------
-   Base Styles
-   -------------------------------------------------------------------------- */
+
 * {
     margin: 0;
     padding: 0;
@@ -122,9 +114,7 @@ body {
     opacity: 1;
 }
 
-/* --------------------------------------------------------------------------
-   Off-screen tracking cue
-   -------------------------------------------------------------------------- */
+
 .track-cue {
     position: absolute;
     top: 50%;
@@ -174,7 +164,7 @@ body {
     color: var(--track-dim-color);
 }
 
-/* Pilot HUD variant */
+
 .pilot-track-cue {
     position: absolute;
     top: 50%;
@@ -236,10 +226,7 @@ body {
     }
 }
 
-/* --------------------------------------------------------------------------
-   CAMERA CORNERS (White brackets)
-   Fixed alignment + responsive scaling for 1080p to 4K
-   -------------------------------------------------------------------------- */
+
 .camera-corners {
     position: absolute;
     top: 1%;
@@ -287,7 +274,7 @@ body {
     border-right-width: 1px;
 }
 
-/* Resolution scaling for 1440p */
+
 @media (min-height: 1440px) {
     .camera-corners {
         top: 1%;
@@ -302,7 +289,7 @@ body {
     }
 }
 
-/* Resolution scaling for 4K */
+
 @media (min-height: 2160px) {
     .camera-corners {
         top: 1%;
@@ -317,9 +304,7 @@ body {
     }
 }
 
-/* --------------------------------------------------------------------------
-   Panel Base Styles
-   -------------------------------------------------------------------------- */
+
 .panel {
     position: absolute;
     padding: calc(var(--scale) * 0.8) calc(var(--scale) * 1.2);
@@ -343,9 +328,7 @@ body {
     font-weight: bold;
 }
 
-/* --------------------------------------------------------------------------
-   TOP LEFT PANEL - Helicopter Info
-   -------------------------------------------------------------------------- */
+
 .top-left-panel {
     top: 1.5%;
     left: 1.5%;
@@ -360,7 +343,7 @@ body {
 
 .location-name {
     font-size: calc(var(--scale) * 1.2);
-    /* Force theme color (some elements override otherwise) */
+    
     color: var(--hud-color) !important;
     margin-bottom: calc(var(--scale) * 0.8);
 }
@@ -371,9 +354,7 @@ body {
     margin-bottom: calc(var(--scale) * 0.4);
 }
 
-/* --------------------------------------------------------------------------
-   TOP CENTER - Compass Tape
-   -------------------------------------------------------------------------- */
+
 .compass-container {
     position: absolute;
     top: calc(var(--scale) * 1.5);
@@ -438,9 +419,7 @@ body {
     color: var(--hud-color);
 }
 
-/* --------------------------------------------------------------------------
-   TOP RIGHT PANEL - Time/Date & Target Info (Integrated Display)
-   -------------------------------------------------------------------------- */
+
 .top-right-panel {
     top: 1.5%;
     right: 1.5%;
@@ -448,7 +427,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    /* Anchor everything with a vertical line on the right */
+    
     border-right: 2px solid var(--hud-color);
     padding-right: calc(var(--scale) * 1.2);
     filter: drop-shadow(0 0 2px var(--hud-glow));
@@ -520,9 +499,7 @@ body {
     font-weight: bold;
 }
 
-/* --------------------------------------------------------------------------
-   CENTER - Crosshair
-   -------------------------------------------------------------------------- */
+
 .crosshair-container {
     position: absolute;
     top: 50%;
@@ -605,9 +582,7 @@ body {
     transform: translateY(-50%);
 }
 
-/* --------------------------------------------------------------------------
-   Lock Progress Bar (Horizontal)
-   -------------------------------------------------------------------------- */
+
 .lock-progress-bar {
     position: absolute;
     bottom: calc(var(--scale) * -3);
@@ -634,9 +609,7 @@ body {
     background: var(--danger-color);
 }
 
-/* --------------------------------------------------------------------------
-   BOTTOM LEFT - Mode Indicators
-   -------------------------------------------------------------------------- */
+
 .bottom-left-panel {
     bottom: 1.5%;
     left: 1.5%;
@@ -686,9 +659,7 @@ body {
     }
 }
 
-/* --------------------------------------------------------------------------
-   BOTTOM CENTER - Gimbal Display (Split Halo)
-   -------------------------------------------------------------------------- */
+
 .gimbal-display {
     position: absolute;
     bottom: 2%;
@@ -778,9 +749,7 @@ body {
     margin-top: calc(var(--scale) * 0.2);
 }
 
-/* --------------------------------------------------------------------------
-   BOTTOM RIGHT - Status
-   -------------------------------------------------------------------------- */
+
 .bottom-right-panel {
     bottom: 1.5%;
     right: 1.5%;
@@ -806,9 +775,7 @@ body {
     font-weight: bold;
 }
 
-/* --------------------------------------------------------------------------
-   Lock Indicator
-   -------------------------------------------------------------------------- */
+
 .lock-indicator {
     position: absolute;
     bottom: calc(var(--scale) * 12);
@@ -835,9 +802,7 @@ body {
     }
 }
 
-/* --------------------------------------------------------------------------
-   POI Markers
-   -------------------------------------------------------------------------- */
+
 .poi-container {
     position: absolute;
     top: 0;
@@ -869,9 +834,7 @@ body {
     color: var(--hud-color);
 }
 
-/* --------------------------------------------------------------------------
-   Vision Mode Filters
-   -------------------------------------------------------------------------- */
+
 .nightvision #polcam-container {
     filter: brightness(1.3) saturate(0) contrast(1.1);
 }
@@ -879,9 +842,7 @@ body {
 
 
 
-/* --------------------------------------------------------------------------
-   PILOT HUD - Tracking Info when camera off
-   -------------------------------------------------------------------------- */
+
 #pilot-hud {
     position: fixed;
     top: 3%;
@@ -903,7 +864,7 @@ body {
     filter: drop-shadow(0 0 2px var(--hud-glow));
 }
 
-/* Hover is now integrated into Pilot HUD */
+
 
 .hover-label {
     font-weight: bold;
@@ -917,7 +878,7 @@ body {
     letter-spacing: 0.5px;
 }
 
-/* Smaller, cleaner hover altitude readout */
+
 #pilot-hover-altitude {
     color: var(--hud-dim);
     font-size: calc(var(--scale) * 0.95);
@@ -941,18 +902,18 @@ body {
     justify-content: flex-start;
 }
 
-/* Keep altitude snug against the button */
+
 #pilot-hover-altitude {
     transform: translateY(1px);
 }
 
 #pilot-hover-label {
-    /* Make it feel like a cockpit annunciator/button */
+    
     border-radius: calc(var(--scale) * 0.25);
     box-shadow: 0 0 calc(var(--scale) * 0.6) rgba(255, 170, 0, 0.25);
 }
 
-/* Only blink when JS adds .blink to the container */
+
 #pilot-hover-label {
     animation: none;
 }
@@ -1058,9 +1019,7 @@ body {
     letter-spacing: 1px;
 }
 
-/* --------------------------------------------------------------------------
-   Postal Code Display
-   -------------------------------------------------------------------------- */
+
 .postal-code {
     font-size: calc(var(--scale) * 1.4);
     font-weight: bold;
@@ -1077,9 +1036,7 @@ body {
     color: var(--hud-dim);
 }
 
-/* --------------------------------------------------------------------------
-   Rappel Indicator
-   -------------------------------------------------------------------------- */
+
 .rappel-available {
     color: #44ff44 !important;
     font-weight: bold;

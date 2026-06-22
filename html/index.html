@@ -11,9 +11,9 @@
 <body>
     <div id="polcam-container" class="hidden">
 
-        <!-- ============================================== -->
-        <!-- CAMERA CORNERS (White brackets) -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="camera-corners">
             <div class="corner top-left"></div>
             <div class="corner top-right"></div>
@@ -21,9 +21,9 @@
             <div class="corner bottom-right"></div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- TOP LEFT PANEL - Helicopter Info -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="panel top-left-panel">
             <div class="agency-name" id="camera-label">LOS SANTOS POLICE DEPARTMENT</div>
             <div class="location-name" id="street-name">Unknown Location</div>
@@ -44,9 +44,9 @@
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- TOP CENTER - Compass Tape -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="compass-container">
             <div class="compass-heading-box">
                 <span id="heading">0</span>°
@@ -95,9 +95,9 @@
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- TOP RIGHT PANEL - Time/Date + Target Info -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="panel top-right-panel">
             <div class="timestamp-block">
                 <div class="time" id="current-time">00:00:00</div>
@@ -138,9 +138,9 @@
         </div>
 
 
-        <!-- ============================================== -->
-        <!-- CENTER - Crosshair with circle -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="crosshair-container">
             <div class="crosshair">
                 <div class="ch-line ch-top"></div>
@@ -151,15 +151,15 @@
 
             <div class="lock-x hidden" id="lock-x"></div>
 
-            <!-- Lock Progress Bar (horizontal under crosshair) -->
+            
             <div class="lock-progress-bar hidden" id="lock-progress-bar">
                 <div class="lock-progress-fill" id="lock-progress-fill"></div>
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- BOTTOM LEFT - Mode Indicators -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="panel bottom-left-panel">
             <div class="mode-row">
                 <span class="mode-label" id="vision-mode">DAY</span>
@@ -198,17 +198,17 @@
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- BOTTOM CENTER - Gimbal Display (Split Halo) -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="gimbal-display">
-            <!-- Azimuth (Rotation) -->
+            
             <div class="halo-container azimuth-halo">
                 <svg class="halo-svg" viewBox="0 0 100 100">
                     <circle class="halo-ring" cx="50" cy="50" r="45" />
-                    <!-- Fixed square at 12 o'clock (Nose of helicopter) -->
+                    
                     <rect class="halo-marker" x="48" y="2" width="4" height="4" />
-                    <!-- Rotating triangle (Camera direction) -->
+                    
                     <polygon class="halo-arrow" id="azimuth-marker" points="50,2 46,10 54,10" />
                 </svg>
                 <div class="halo-data">
@@ -217,15 +217,15 @@
                 </div>
             </div>
 
-            <!-- Elevation (Tilt) - No full ring, just the arc -->
+            
             <div class="halo-container elevation-halo">
                 <svg class="halo-svg" viewBox="0 0 100 100">
-                    <!-- Dynamic arc showing current elevation -->
-                    <!-- Static track showing range (+30 to -90) -->
+                    
+                    
                     <path class="halo-track" id="elevation-track" d="" />
-                    <!-- Dynamic arc showing current elevation (optional fill, or just track) -->
-                    <!-- <path class="halo-arc" id="elevation-arc" d="" /> -->
-                    <!-- The dot follows the arc end -->
+                    
+                    
+                    
                     <circle class="halo-marker-dot" id="elevation-marker" cx="50" cy="50" r="3" />
                 </svg>
                 <div class="halo-data">
@@ -235,9 +235,9 @@
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- BOTTOM RIGHT - Status -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="panel bottom-right-panel">
             <div class="status-row">
                 <span class="status-label">ZOOM</span>
@@ -260,21 +260,21 @@
             </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- LOCK INDICATOR (center-bottom) -->
-        <!-- ============================================== -->
+        
+        
+        
         <div class="lock-indicator hidden" id="lock-indicator">
             <span>ACQUIRING</span>
         </div>
 
-        <!-- POI Container -->
+        
         <div class="poi-container" id="poi-container"></div>
 
     </div>
 
-    <!-- ============================================== -->
-    <!-- PILOT HUD (Target Tracking Info when camera off) -->
-    <!-- ============================================== -->
+    
+    
+    
     <div id="pilot-hud" class="hidden">
         <div class="pilot-hud-content">
             <div class="pilot-hud-header">TARGET TRACKING</div>
