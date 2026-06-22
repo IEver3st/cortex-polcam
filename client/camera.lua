@@ -34,7 +34,11 @@ local math_deg = math.deg
 local math_sin = math.sin
 local math_cos = math.cos
 local math_sqrt = math.sqrt
-local math_atan2 = math.atan2
+local math_atan = math.atan
+
+local function math_atan2(y, x)
+    return math_atan(y, x)
+end
 
 function CreatePolCamCamera()
     if PolCam.Camera and DoesCamExist(PolCam.Camera) then
@@ -303,8 +307,8 @@ function TrackGroundLockPoint()
     
     local targetHeading = GetHeadingFromVector_2d(dx, dy)
     
-    local horizontalDist = math.sqrt(dx * dx + dy * dy)
-    local targetPitch = -math.deg(math.atan2(dz, horizontalDist))
+    local horizontalDist = math_sqrt(dx * dx + dy * dy)
+    local targetPitch = -math_deg(math_atan2(dz, horizontalDist))
     
     local delta = GetFrameTime() * (Config.Tracking.TrackingSpeed or 12.0)
     
@@ -328,8 +332,8 @@ function TrackLockedTarget()
     
     local targetHeading = GetHeadingFromVector_2d(dx, dy)
     
-    local horizontalDist = math.sqrt(dx * dx + dy * dy)
-    local targetPitch = -math.deg(math.atan2(dz, horizontalDist))
+    local horizontalDist = math_sqrt(dx * dx + dy * dy)
+    local targetPitch = -math_deg(math_atan2(dz, horizontalDist))
     
     local delta = GetFrameTime() * (Config.Tracking.TrackingSpeed or 12.0)
     

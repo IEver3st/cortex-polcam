@@ -3,8 +3,8 @@ game 'gta5'
 lua54 'yes'
 
 name 'polcam'
-description 'Police Helicopter Camera System - Eye in the Sky'
-author 'PolCam Script'
+description 'Cortex PolCam - Police Helicopter Camera System'
+author 'Cortex PolCam'
 version '1.0.0'
 
 -- Shared configuration
@@ -12,8 +12,10 @@ shared_scripts {
     'config.lua'
 }
 
--- Client scripts (IMPORTANT: main.lua must be last as it calls functions from other scripts)
+-- Client scripts
+-- Load order: utils.lua first (shared helpers), main.lua last (calls functions from other scripts)
 client_scripts {
+    'client/utils.lua',
     'client/sounds.lua',
     'client/camera.lua',
     'client/vision.lua',

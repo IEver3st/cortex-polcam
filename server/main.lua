@@ -59,10 +59,22 @@ local SharedCameraState = {} -- vehicleNetId -> {heading, pitch, zoom, targetZoo
 local ActiveSpotlights = {} -- vehicleNetId -> {active, radius, color, owner, heliCoords, groundCoords, targetNetId, trackingTarget}
 local HeliTracking = {} -- vehicleNetId -> {active, targetNetId, targetType, ownerSrc, seq}
 local ActiveAirFeeds = {} -- vehicleNetId -> feed state
+local ActiveRappels = {} -- playerId -> {startTime, vehicleNetId, altitude, model}
+local SyncedMarkers = {} -- markerId -> {coords, type, creator, vehicleNetId, visibleTo}
 
 local AIR_FEED_STALE_MS = 1200
 local AIR_FEED_MAINTENANCE_INTERVAL_MS = 250
 local AIR_FEED_ID_PREFIX = 'air:'
+
+-- Forward declarations for functions referenced before their definitions.
+local BroadcastHeliTracking
+local ClearHeliTracking
+
+local function DebugLog(message)
+    if Config and Config.Debug and Config.Debug.Enabled then
+        print(message)
+    end
+end
 
 local function TrimString(value, fallback)
     if value == nil then
@@ -454,7 +466,7 @@ end
 RegisterNetEvent('polcam:createPOI')
 AddEventHandler('polcam:createPOI', function(poi)
     local source = source
-    
+
     -- Validate POI data
     if not poi or not poi.id or not poi.coords then
         return
@@ -530,7 +542,7 @@ local function PickNextCameraOwner(vehicleNetId, excludingSrc)
 end
 
 local function HandoffCamera(vehicleNetId, oldOwner)
-    print("[PolCam Server DEBUG] HandoffCamera called - vehicleNetId: " .. tostring(vehicleNetId) .. ", oldOwner: " .. tostring(oldOwner))
+    DebugLog("[PolCam Server DEBUG] HandoffCamera called - vehicleNetId: " .. tostring(vehicleNetId) .. ", oldOwner: " .. tostring(oldOwner))
     
     -- NOTE: Tracking is now per-helicopter and persists through handoffs.
     -- We do NOT clear tracking here - it transfers to the new owner.
@@ -540,7 +552,7 @@ local function HandoffCamera(vehicleNetId, oldOwner)
         -- No next owner waiting - the old owner may re-enter the camera shortly
         -- Do NOT send forceReleaseAll here - the client already deactivated their camera
         -- and we want them to be able to resume seamlessly
-        print("[PolCam Server DEBUG] No next owner in waitlist, skipping forceReleaseAll")
+        DebugLog("[PolCam Server DEBUG] No next owner in waitlist, skipping forceReleaseAll")
         
         -- Clear spotlight from this helicopter since no one is operating it
         local spotlight = ActiveSpotlights[vehicleNetId]
@@ -558,7 +570,7 @@ local function HandoffCamera(vehicleNetId, oldOwner)
     -- There IS a next owner waiting - tell old owner to release their local state
     -- so the new owner can take over cleanly
     TriggerClientEvent('polcam:forceReleaseAll', oldOwner)
-    print("[PolCam Server DEBUG] Sent polcam:forceReleaseAll to oldOwner: " .. tostring(oldOwner))
+    DebugLog("[PolCam Server DEBUG] Sent polcam:forceReleaseAll to oldOwner: " .. tostring(oldOwner))
 
     ActiveHeliCameras[vehicleNetId] = nextOwner
     CameraWaitlists[vehicleNetId] = nil
@@ -581,7 +593,7 @@ local function HandoffCamera(vehicleNetId, oldOwner)
         tracking.ownerSrc = nextOwner
         -- Broadcast so all occupants know tracking transferred
         BroadcastHeliTracking(vehicleNetId)
-        print("[PolCam Server DEBUG] Transferred tracking ownership to new owner: " .. tostring(nextOwner))
+        DebugLog("[PolCam Server DEBUG] Transferred tracking ownership to new owner: " .. tostring(nextOwner))
     end
 
     local spotlight = ActiveSpotlights[vehicleNetId]
@@ -632,11 +644,11 @@ AddEventHandler('polcam:cameraRelease', function(vehicleNetId)
     end
 end)
 
-AddEventHandler('playerDropped', function()
-    local src = source
+local function HandlePlayerDropped(src)
     LastTrackingStartAt[src] = nil
     LastTrackingStopAt[src] = nil
     LastTrackingStateAt[src] = nil
+
     for vehNetId, owner in pairs(ActiveHeliCameras) do
         if owner == src then
             ActiveHeliCameras[vehNetId] = nil
@@ -655,7 +667,87 @@ AddEventHandler('playerDropped', function()
             RemoveAirFeed(vehNetId)
         end
     end
-end)
+
+    -- Remove any spotlight instance owned by this player
+    for vehicleNetId, spotlight in pairs(ActiveSpotlights) do
+        if spotlight and spotlight.owner == src then
+            ActiveSpotlights[vehicleNetId] = nil
+            LastSpotlightBroadcastAt[vehicleNetId] = nil
+            LastSpotlightPositionAt[vehicleNetId] = nil
+            LastSpotlightRadiusAt[vehicleNetId] = nil
+            TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, nil)
+        end
+    end
+
+    -- Handle per-heli tracking cleanup
+    -- Only clear tracking if heli becomes empty (no other occupants)
+    for vehicleNetId, tracking in pairs(HeliTracking) do
+        if tracking and tracking.ownerSrc == src then
+            -- Check if anyone else is still in this heli
+            local hasOtherOccupants = false
+            local players = GetPlayers()
+            for _, playerId in ipairs(players) do
+                local playerSrc = tonumber(playerId)
+                if playerSrc and playerSrc ~= src then
+                    local ped = GetPlayerPed(playerSrc)
+                    if ped and ped ~= 0 then
+                        local playerVeh = GetVehiclePedIsIn(ped, false)
+                        if playerVeh and playerVeh ~= 0 then
+                            local playerVehNetId = (DoesEntityExist(playerVeh) and NetworkGetNetworkIdFromEntity(playerVeh) or nil)
+                            if playerVehNetId == vehicleNetId then
+                                hasOtherOccupants = true
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+
+            if hasOtherOccupants then
+                -- Transfer tracking to another occupant (pick any)
+                for _, playerId in ipairs(players) do
+                    local playerSrc = tonumber(playerId)
+                    if playerSrc and playerSrc ~= src then
+                        local ped = GetPlayerPed(playerSrc)
+                        if ped and ped ~= 0 then
+                            local playerVeh = GetVehiclePedIsIn(ped, false)
+                            if playerVeh and playerVeh ~= 0 then
+                                local playerVehNetId = (DoesEntityExist(playerVeh) and NetworkGetNetworkIdFromEntity(playerVeh) or nil)
+                                if playerVehNetId == vehicleNetId then
+                                    tracking.ownerSrc = playerSrc
+                                    BroadcastHeliTracking(vehicleNetId)
+                                    DebugLog("[PolCam Server DEBUG] Transferred tracking ownership from disconnected player to: " .. tostring(playerSrc))
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                -- Heli is empty, clear tracking
+                ClearHeliTracking(vehicleNetId)
+                HeliTracking[vehicleNetId] = nil
+                DebugLog("[PolCam Server DEBUG] Cleared HeliTracking for empty heli: " .. tostring(vehicleNetId))
+            end
+        end
+    end
+
+    -- Remove rappel state when player disconnects
+    if ActiveRappels[src] then
+        ActiveRappels[src] = nil
+    end
+
+    -- Remove synced markers created by this player
+    for id, marker in pairs(SyncedMarkers or {}) do
+        if type(marker) == 'table' and marker.creator == src then
+            SyncedMarkers[id] = nil
+            TriggerClientEvent('polcam:syncedMarkerRemoved', -1, id)
+        end
+    end
+
+    -- Note: We DO NOT clear SharedCameraState here - it should persist
+    -- so that another passenger can take over the camera with the same state
+end
 
 -- ============================================================================
 -- SHARED CAMERA STATE SYNC
@@ -886,7 +978,7 @@ local function IsVehicleOccupiedByAnyPlayer(vehicleNetId)
 end
 
 -- Broadcast tracking state to ALL players in the same helicopter
-local function BroadcastHeliTracking(vehicleNetId)
+BroadcastHeliTracking = function(vehicleNetId)
     if not vehicleNetId then 
         if Config and Config.Debug and Config.Debug.Enabled then
             print("[PolCam Server DEBUG] BroadcastHeliTracking: vehicleNetId is nil, aborting")
@@ -933,7 +1025,7 @@ local function BroadcastHeliTracking(vehicleNetId)
     end
 end
 
-local function ClearHeliTracking(vehicleNetId)
+ClearHeliTracking = function(vehicleNetId)
     if not vehicleNetId then return end
 
     local currentState = HeliTracking[vehicleNetId] or { seq = 0 }
@@ -1303,9 +1395,6 @@ end)
 -- ============================================================================
 -- RAPPEL SYNC
 -- ============================================================================
-local ActiveRappels = {} -- playerId -> {startTime, vehicleNetId, altitude, model}
-
-
 -- Handle rappel start
 RegisterNetEvent('polcam:rappelStart')
 AddEventHandler('polcam:rappelStart', function(data)
@@ -1358,8 +1447,6 @@ end)
 -- ============================================================================
 -- SYNCED MARKERS (Shared between helicopter crew)
 -- ============================================================================
-local SyncedMarkers = {} -- markerId -> {coords, type, creator, vehicleNetId, visibleTo}
-
 -- Create a synced marker visible to players in the same helicopter
 RegisterNetEvent('polcam:createSyncedMarker')
 AddEventHandler('polcam:createSyncedMarker', function(markerData)
@@ -1372,6 +1459,8 @@ AddEventHandler('polcam:createSyncedMarker', function(markerData)
 
     local vehicleNetId = NetworkGetNetworkIdFromEntity(vehicle)
     if not vehicleNetId then return end
+
+    SyncedMarkers = SyncedMarkers or {}
 
     local markerId = markerData.id or tostring(source) .. '_' .. tostring(GetGameTimer())
     
@@ -1397,7 +1486,9 @@ end)
 RegisterNetEvent('polcam:removeSyncedMarker')
 AddEventHandler('polcam:removeSyncedMarker', function(markerId)
     local source = source
-    
+
+    SyncedMarkers = SyncedMarkers or {}
+
     local marker = SyncedMarkers[markerId]
     if marker and marker.creator == source then
         SyncedMarkers[markerId] = nil
@@ -1409,10 +1500,12 @@ end)
 RegisterNetEvent('polcam:requestSyncedMarkers')
 AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
     local source = source
-    
+
+    SyncedMarkers = SyncedMarkers or {}
+
     local vehicleMarkers = {}
     for id, marker in pairs(SyncedMarkers) do
-        if marker.vehicleNetId == vehicleNetId then
+        if type(marker) == 'table' and marker.vehicleNetId == vehicleNetId then
             vehicleMarkers[id] = marker
         end
     end
@@ -1484,93 +1577,8 @@ end)
 -- ============================================================================
 -- PLAYER DISCONNECT CLEANUP
 -- ============================================================================
-AddEventHandler('playerDropped', function(reason)
-
-    local src = source
-    LastTrackingStartAt[src] = nil
-    LastTrackingStopAt[src] = nil
-    LastTrackingStateAt[src] = nil
-
-
-    -- Remove any spotlight instance owned by this player
-    for vehicleNetId, spotlight in pairs(ActiveSpotlights) do
-        if spotlight and spotlight.owner == src then
-            ActiveSpotlights[vehicleNetId] = nil
-            LastSpotlightBroadcastAt[vehicleNetId] = nil
-            LastSpotlightPositionAt[vehicleNetId] = nil
-            LastSpotlightRadiusAt[vehicleNetId] = nil
-            TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, nil)
-        end
-    end
-
-    -- Handle per-heli tracking cleanup
-    -- Only clear tracking if heli becomes empty (no other occupants)
-    for vehicleNetId, tracking in pairs(HeliTracking) do
-        if tracking and tracking.ownerSrc == src then
-            -- Check if anyone else is still in this heli
-            local hasOtherOccupants = false
-            local players = GetPlayers()
-            for _, playerId in ipairs(players) do
-                local playerSrc = tonumber(playerId)
-                if playerSrc and playerSrc ~= src then
-                    local ped = GetPlayerPed(playerSrc)
-                    if ped and ped ~= 0 then
-                        local playerVeh = GetVehiclePedIsIn(ped, false)
-                        if playerVeh and playerVeh ~= 0 then
-                            local playerVehNetId = (DoesEntityExist(playerVeh) and NetworkGetNetworkIdFromEntity(playerVeh) or nil)
-                            if playerVehNetId == vehicleNetId then
-                                hasOtherOccupants = true
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-            
-            if hasOtherOccupants then
-                -- Transfer tracking to another occupant (pick any)
-                for _, playerId in ipairs(players) do
-                    local playerSrc = tonumber(playerId)
-                    if playerSrc and playerSrc ~= src then
-                        local ped = GetPlayerPed(playerSrc)
-                        if ped and ped ~= 0 then
-                            local playerVeh = GetVehiclePedIsIn(ped, false)
-                            if playerVeh and playerVeh ~= 0 then
-                                local playerVehNetId = (DoesEntityExist(playerVeh) and NetworkGetNetworkIdFromEntity(playerVeh) or nil)
-                                if playerVehNetId == vehicleNetId then
-                                    tracking.ownerSrc = playerSrc
-                                    BroadcastHeliTracking(vehicleNetId)
-                                    print("[PolCam Server DEBUG] Transferred tracking ownership from disconnected player to: " .. tostring(playerSrc))
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            else
-                -- Heli is empty, clear tracking
-                ClearHeliTracking(vehicleNetId)
-                HeliTracking[vehicleNetId] = nil
-                print("[PolCam Server DEBUG] Cleared HeliTracking for empty heli: " .. tostring(vehicleNetId))
-            end
-        end
-    end
-
-    -- Remove rappel state when player disconnects
-    if ActiveRappels[src] then
-        ActiveRappels[src] = nil
-    end
-
-    -- Remove synced markers created by this player
-    for id, marker in pairs(SyncedMarkers) do
-        if marker.creator == src then
-            SyncedMarkers[id] = nil
-            TriggerClientEvent('polcam:syncedMarkerRemoved', -1, id)
-        end
-    end
-    
-    -- Note: We DO NOT clear SharedCameraState here - it should persist
-    -- so that another passenger can take over the camera with the same state
+AddEventHandler('playerDropped', function()
+    HandlePlayerDropped(source)
 end)
 
 -- ============================================================================
@@ -1579,6 +1587,8 @@ end)
 AddEventHandler('onResourceStart', function(resourceName)
     if GetCurrentResourceName() ~= resourceName then return end
     
-    print("[PolCam] Server-side initialized")
-    print("[PolCam] POI and spotlight synchronization active")
+    if Config and Config.Debug and Config.Debug.Enabled then
+        print("[PolCam] Server-side initialized")
+        print("[PolCam] POI and spotlight synchronization active")
+    end
 end)

@@ -60,20 +60,7 @@ local ClearDrawOrigin = ClearDrawOrigin
 local CreateThread = CreateThread
 local Wait = Wait
 
--- Safe wrapper to get network ID from entity
--- Returns nil if entity doesn't exist or isn't networked (prevents warning spam)
-local function SafeGetNetworkId(entity)
-    if not entity or entity == 0 then
-        return nil
-    end
-    if not DoesEntityExist(entity) then
-        return nil
-    end
-    if not NetworkGetEntityIsNetworked(entity) then
-        return nil
-    end
-    return NetworkGetNetworkIdFromEntity(entity)
-end
+-- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
 
 local function isEsLibStarted()
     return GetResourceState('es_lib') == 'started'

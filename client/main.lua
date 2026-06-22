@@ -33,20 +33,7 @@ local NetworkGetNetworkIdFromEntity = NetworkGetNetworkIdFromEntity
 local NetworkGetEntityFromNetworkId = NetworkGetEntityFromNetworkId
 local NetworkGetEntityIsNetworked = NetworkGetEntityIsNetworked
 
--- Safe wrapper to get network ID from entity
--- Returns nil if entity doesn't exist or isn't networked (prevents warning spam)
-local function SafeGetNetworkId(entity)
-    if not entity or entity == 0 then
-        return nil
-    end
-    if not DoesEntityExist(entity) then
-        return nil
-    end
-    if not NetworkGetEntityIsNetworked(entity) then
-        return nil
-    end
-    return NetworkGetNetworkIdFromEntity(entity)
-end
+-- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
 
 local DoesCamExist = DoesCamExist
 local SetCamRot = SetCamRot
@@ -60,6 +47,12 @@ local max = math.max
 local min = math.min
 local sqrt = math.sqrt
 local format = string.format
+
+local function DebugLog(message)
+    if Config and Config.Debug and Config.Debug.Enabled then
+        print(message)
+    end
+end
 
 -- ============================================================================
 -- NOTIFICATIONS (es_lib / ox_lib)
@@ -291,7 +284,9 @@ Config.Keybinds = Config.Keybinds or {}
 Config.Lib = Config.Lib or {}
 Config.EsHud = Config.EsHud or {}
 
--- Expose notification helper for other modules
+-- Expose notification helper globally so modules loaded before main.lua
+-- (helicontrol, rappel, etc.) can call _G.PolCamNotify at runtime.
+-- They must reference _G.PolCamNotify inside functions, NOT cache it at load time.
 _G.PolCamNotify = PolCamNotify
 
 PolCam = {
@@ -438,10 +433,16 @@ local function CanUseEsLibSettings()
         and exports.es_lib
         and exports.es_lib.registerSettingsScript
         and exports.es_lib.getSetting
-        and exports.es_lib.onSettingChange
 end
 
-function getSettingsDefinition()
+local POLCAM_SETTING_WATCH = {
+    [PolCamSettingsKeys.HighContrastEnabled] = true,
+    [PolCamSettingsKeys.HighContrastTheme] = true,
+    [PolCamSettingsKeys.TargetLabelFollowTheme] = true,
+    [PolCamSettingsKeys.TargetLabelColor] = true,
+}
+
+local function getSettingsDefinition()
     local targetCfg = (Config.UI and Config.UI.TargetLabel) or {}
     local highContrastCfg = (Config.UI and Config.UI.HighContrast) or {}
 
@@ -552,21 +553,17 @@ local function RegisterPolCamSettingsIntegration()
 
     exports.es_lib:registerSettingsScript('polcam', getSettingsDefinition())
     ApplyPolCamClientSettingsFromEsLib()
-
-    local keys = {
-        PolCamSettingsKeys.HighContrastEnabled,
-        PolCamSettingsKeys.HighContrastTheme,
-        PolCamSettingsKeys.TargetLabelFollowTheme,
-        PolCamSettingsKeys.TargetLabelColor,
-    }
-
-    for _, key in ipairs(keys) do
-        exports.es_lib:onSettingChange(key, function()
-            ApplyPolCamClientSettingsFromEsLib()
-            PushPolCamClientSettingsToNui()
-        end)
-    end
+    PushPolCamClientSettingsToNui()
 end
+
+AddEventHandler('es_lib:settingChanged', function(key)
+    if not POLCAM_SETTING_WATCH[key] then
+        return
+    end
+
+    ApplyPolCamClientSettingsFromEsLib()
+    PushPolCamClientSettingsToNui()
+end)
 
 -- ============================================================================
 -- KEY BINDINGS
@@ -654,13 +651,15 @@ local function RegisterKeybinds()
                 ToggleHoverMode()
             end
         end, false)
+        -- Console-only utility commands (not RegisterKeyMapping because /hover takes
+        -- an altitude argument; the keybind toggle is handled by polcam_hover above).
         RegisterCommand('hover', function(source, args)
             if SetHoverAltitude and args[1] then
                 local alt = tonumber(args[1])
                 if alt then
                     SetHoverAltitude(alt)
                 else
-                    print("Usage: /hover [altitude_ft]")
+                    PolCamNotify('error', 'Usage: /hover [altitude_ft]')
                 end
             else
                 if ToggleHoverMode then
@@ -1758,8 +1757,8 @@ function UIUpdateLoop()
                     hoverActive = hoverActive,
                     orbitActive = orbitActive,
                     groundLockActive = groundLockActive,
-                    lrfStatus = "READY",
-                    systemStatus = "NORM 32°C"
+                    lrfStatus = (Config.UI and Config.UI.LRFStatus) or "READY",
+                    systemStatus = (Config.UI and Config.UI.SystemStatus) or "NORM"
                 }
             })
         
@@ -2012,7 +2011,7 @@ end)
 -- persists through camera handoffs. It will be synced via polcam:heliTrackingState.
 RegisterNetEvent('polcam:forceReleaseAll')
 AddEventHandler('polcam:forceReleaseAll', function()
-    print("[PolCam DEBUG] Received polcam:forceReleaseAll")
+    DebugLog("[PolCam DEBUG] Received polcam:forceReleaseAll")
     
     -- NOTE: Do NOT clear tracking here - tracking is per-heli and persists
     -- Only clear camera/spotlight/ground lock state

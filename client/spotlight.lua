@@ -30,20 +30,7 @@ local math_max = math.max
 local math_exp = math.exp
 local pairs = pairs
 
--- Safe wrapper to get network ID from entity
--- Returns nil if entity doesn't exist or isn't networked (prevents warning spam)
-local function SafeGetNetworkId(entity)
-    if not entity or entity == 0 then
-        return nil
-    end
-    if not DoesEntityExist(entity) then
-        return nil
-    end
-    if not NetworkGetEntityIsNetworked(entity) then
-        return nil
-    end
-    return NetworkGetNetworkIdFromEntity(entity)
-end
+-- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
 
 -- ============================================================================
 -- SPOTLIGHT STATE

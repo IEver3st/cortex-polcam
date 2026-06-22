@@ -4,7 +4,9 @@
 ]]
 Config = {}
 -- CORE SETTINGS
-Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
+-- Add your server's helicopter model names here. "polmav" is a common addon;
+-- "maverick" is a vanilla GTA V helicopter. Adjust for your vehicle pack.
+Config.AllowedHelicopters = { "polmav", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }
 Config.InstantLock = false
 Config.Lib = { Notify = 'auto' }
@@ -62,6 +64,8 @@ Config.UI = {
         FollowHighContrast = true,
     },
     HighContrast = { Enabled = true, Theme = "green" }, -- Options: green, black, orange, red, purple, blue, pink OR a Hex Code (e.g. "#FF00FF")
+    LRFStatus = "READY",       -- Laser range finder status text shown on HUD
+    SystemStatus = "NORM",     -- System status text shown on HUD
 }
 
 -- VISION SETTINGS

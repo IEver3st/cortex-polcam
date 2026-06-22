@@ -215,33 +215,12 @@ end)
 -- ============================================================================
 -- SERVER EVENTS
 -- ============================================================================
-RegisterNetEvent('polcam:syncPOI')
-AddEventHandler('polcam:syncPOI', function(marker)
-    -- Don't add our own markers twice
-    if marker.owner == GetPlayerServerId(PlayerId()) then return end
-
-    AddSharedMarker(marker, "PolCam Marker (Shared)")
-end)
-
 RegisterNetEvent('polcam:receivePOI')
 AddEventHandler('polcam:receivePOI', function(marker)
     if not marker or not marker.id or not marker.coords then return end
     if marker.owner == GetPlayerServerId(PlayerId()) then return end
 
     AddSharedMarker(marker, "PolCam Marker (Shared)")
-end)
-
-RegisterNetEvent('polcam:removeSyncedPOI')
-AddEventHandler('polcam:removeSyncedPOI', function(markerId)
-    for i, marker in ipairs(POIData.AllMarkers) do
-        if marker.id == markerId then
-            if marker.blip and DoesBlipExist(marker.blip) then
-                RemoveBlip(marker.blip)
-            end
-            table.remove(POIData.AllMarkers, i)
-            break
-        end
-    end
 end)
 
 RegisterNetEvent('polcam:poiRemoved')
