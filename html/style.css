@@ -18,7 +18,7 @@
     --danger-color: #ff4444;
     --warning-color: #ffaa00;
 
-    --font-hud: 'Share Tech Mono', 'Courier New', monospace;
+    --font-hud: Consolas, 'Lucida Console', 'DejaVu Sans Mono', 'Courier New', monospace;
 
     --text-shadow: 0 0 4px var(--hud-glow);
 

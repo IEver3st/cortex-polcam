@@ -60,20 +60,7 @@ local ClearDrawOrigin = ClearDrawOrigin
 local CreateThread = CreateThread
 local Wait = Wait
 
--- Safe wrapper to get network ID from entity
--- Returns nil if entity doesn't exist or isn't networked (prevents warning spam)
-local function SafeGetNetworkId(entity)
-    if not entity or entity == 0 then
-        return nil
-    end
-    if not DoesEntityExist(entity) then
-        return nil
-    end
-    if not NetworkGetEntityIsNetworked(entity) then
-        return nil
-    end
-    return NetworkGetNetworkIdFromEntity(entity)
-end
+-- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
 
 local function isEsLibStarted()
     return GetResourceState('es_lib') == 'started'
@@ -1177,7 +1164,7 @@ function StartLocking()
         return
     end
     
-    -- Non-instant mode - use es_lib progress bar
+    -- Non-instant mode - use es_lib radial progress
     if not IsEsLibAvailable() then
         -- Fallback to instant lock if es_lib not available
         CompleteLock(targetEntity, targetType)
@@ -1189,13 +1176,13 @@ function StartLocking()
     -- Get the lock duration from config (default 2000ms)
     local lockDuration = (Config.Tracking and Config.Tracking.LockDurationMs) or 2000
     
-    -- Run the progress bar in a thread to avoid blocking
+    -- Run the progress UI in a thread to avoid blocking
     CreateThread(function()
         local completed = exports.es_lib:progress({
             duration = lockDuration,
             label = "ACQUIRING TARGET",
             position = "bottom",
-            style = "bar",
+            style = "circle",
             canCancel = true,
             useWhileDead = false,
             disable = {

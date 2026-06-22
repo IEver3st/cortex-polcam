@@ -334,7 +334,7 @@ function ActivateOrbit()
     
     HeliControl.OrbitAltitude = heliCoords.z
     HeliControl.HoverTargetZ = HeliControl.OrbitAltitude
-    HeliControl.OrbitAngle = math.atan2(dy, dx)
+    HeliControl.OrbitAngle = math.atan(dy, dx)
     HeliControl.OrbitAngularSpeed = (HeliControl.OrbitSpeed or 15.0) / HeliControl.OrbitRadius
     HeliControl.OrbitLastTick = GetGameTimer()
     HeliControl.OrbitDirection = 1
@@ -472,7 +472,7 @@ CreateThread(function()
                     end
 
                     if not HeliControl.OrbitAngle then
-                        HeliControl.OrbitAngle = math.atan2(dy, dx)
+                        HeliControl.OrbitAngle = math.atan(dy, dx)
                     end
 
                     local vel = GetEntityVelocity(heli)

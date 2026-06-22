@@ -22,22 +22,8 @@ local NetworkGetNetworkIdFromEntity = NetworkGetNetworkIdFromEntity
 local NetworkGetEntityFromNetworkId = NetworkGetEntityFromNetworkId
 local NetworkGetEntityIsNetworked = NetworkGetEntityIsNetworked
 
--- Safe wrapper to get network ID from entity
--- Returns nil if entity doesn't exist or isn't networked (prevents warning spam)
-local function SafeGetNetworkId(entity)
-    if not entity or entity == 0 then
-        return nil
-    end
-    if not DoesEntityExist(entity) then
-        return nil
-    end
-    if not NetworkGetEntityIsNetworked(entity) then
-        return nil
-    end
-    return NetworkGetNetworkIdFromEntity(entity)
-end
+-- SafeGetNetworkId is provided by client/utils.lua (loaded first in fxmanifest)
 local GetGroundZFor_3dCoord = GetGroundZFor_3dCoord
-local PolCamNotify = PolCamNotify
 local GetPlayerServerId = GetPlayerServerId
 local GetPlayerFromServerId = GetPlayerFromServerId
 local GetPlayerPed = GetPlayerPed
@@ -301,6 +287,20 @@ local function RegisterRappelKeybind()
     RegisterCommand('polcam_rappel', function()
         if not IsRappelEnabled() then return end
 
+        local inSeat, vehicle = IsInAllowedRappelSeat()
+        if not inSeat or not vehicle then
+            RappelState.ConfirmPending = false
+            RappelState.ConfirmExpiresAt = 0
+            return
+        end
+
+        local canRappel = CanRappelFromAltitude(vehicle)
+        if not canRappel then
+            RappelState.ConfirmPending = false
+            RappelState.ConfirmExpiresAt = 0
+            return
+        end
+
         local now = GetGameTimer()
         local confirmWindowMs = 2500
 
@@ -312,8 +312,8 @@ local function RegisterRappelKeybind()
                 print("[PolCam] Rappel confirm: press again to rappel")
             end
 
-            if PolCamNotify then
-                PolCamNotify('inform', 'Press rappel key again to confirm')
+            if _G.PolCamNotify then
+                _G.PolCamNotify('inform', 'Press rappel key again to confirm')
             end
             return
         end
@@ -350,6 +350,10 @@ local function MonitorRappelAvailability()
                         })
                     end
                 else
+                    if RappelState.ConfirmPending then
+                        RappelState.ConfirmPending = false
+                        RappelState.ConfirmExpiresAt = 0
+                    end
                     if RappelState.CanRappel then
                         RappelState.CanRappel = false
                         SendNUIMessage({

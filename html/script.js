@@ -118,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
     Elements.postal = document.getElementById('postal');
     Elements.cameraLabel = document.getElementById('camera-label');
     Elements.rappelIndicator = document.getElementById('rappel-indicator');
-    Elements.hoverFloat = document.getElementById('hover-float');
     Elements.hoverAltitudePanel = document.getElementById('hover-altitude-panel');
 
     // Pilot Hover (integrated into Pilot HUD)
@@ -192,8 +191,8 @@ window.addEventListener('message', (event) => {
             setHoverStatus(data.active, data.altitude);
             break;
         case 'hoverAltitude':
-            if (Elements.hoverAltitude) {
-                Elements.hoverAltitude.textContent = data.altitude;
+            if (Elements.hoverAltitudePanel) {
+                Elements.hoverAltitudePanel.textContent = data.altitude;
             }
             break;
         case 'updatePilotHUD':
@@ -216,9 +215,6 @@ function showHUD(data) {
     Elements.container.classList.remove('hidden');
     Elements.container.classList.remove('hud-fade-out');
     Elements.container.classList.add('hud-fade-in');
-    if (Elements.hoverFloat && State.hoverActive) {
-        Elements.hoverFloat.classList.add('hidden');
-    }
 
     if (data.visionMode) {
         setVisionMode(data.visionMode);
@@ -244,9 +240,6 @@ function hideHUD() {
         if (!State.visible) {
             Elements.container.classList.add('hidden');
             Elements.container.classList.remove('hud-fade-out');
-            if (Elements.hoverFloat && State.hoverActive) {
-                Elements.hoverFloat.classList.remove('hidden');
-            }
         }
     }, 500);
 
@@ -425,10 +418,6 @@ function updateTime() {
         // Convert to UTC
         now = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
         suffix = 'Z';
-    } else if (State.timeFormat === 'INGAME') {
-        // In-game time would need to be passed from Lua
-        // For now, show local time with 'G' suffix
-        suffix = 'G';
     }
 
     let hours = now.getHours();

@@ -1,15 +1,12 @@
-# PolCam - Police Helicopter Camera System
-![Blue Helicopter Theme Tracking a vehicle with the spotlight enabled.](https://media.discordapp.net/attachments/723540538627981362/1467627747051569265/image.png?ex=6981125a&is=697fc0da&hm=ea42f7045f5236b888321a9accb477299b1cc30a0ce8091759718ae2d998159a&=&format=webp&quality=lossless&width=2129&height=1198)
-![Orange Heli Theme iwht spotlight enabled in Freecam](https://media.discordapp.net/attachments/723540538627981362/1467627748120858799/image.png?ex=6981125a&is=697fc0da&hm=fbe0015e783dd164e120a06b63b7a458d01283daf881368488bdde0013109faf&=&format=webp&quality=lossless&width=2131&height=1198)
-![Heli HUD that is shown outside of the camera while a track is active or hover is active.](https://media.discordapp.net/attachments/723540538627981362/1467627748582494342/image.png?ex=6981125a&is=697fc0da&hm=01948b1d018873cdb455a0a8cbff569fd0622683d611345a5329701e3b4ab8fc&=&format=webp&quality=lossless&width=1493&height=1081)
-![Green Hud Tracking a Vehicle](https://media.discordapp.net/attachments/723540538627981362/1467627749702111546/image.png?ex=6981125a&is=697fc0da&hm=7fda148cfe2d10639e4402b82d04ee3b73e033276bcaa29c67b9d837ebde323c&=&format=webp&quality=lossless&width=2131&height=1198)
+# Cortex PolCam
+
 A FLIR-style police helicopter camera system for FiveM with target tracking, spotlight, hover/orbit autopilot, rappelling, and multi-crew synchronization.
 
 ## Dependencies
 
 | Resource | Required | Notes |
 |----------|----------|-------|
-| **es_lib** | **Yes** | Required for notifications, progress bars, and debug tools. Must be started before polcam. |
+| **es_lib** | **Yes** | Required for notifications, radial progress, and debug tools. Must be started before polcam. |
 | **es_hud** | Optional | Auto-detected. Hides the player HUD while the camera is active and optionally forces the aircraft HUD for the pilot. |
 | **nearest-postal** | Optional | Provides postal code data for the camera overlay. |
 
@@ -32,7 +29,7 @@ Config.EsHud = {
 
 ## es_lib Integration
 
-es_lib is used for notifications, the target lock progress bar, and debug tooling.
+es_lib is used for notifications, the target lock radial progress, and debug tooling.
 
 ```lua
 Config.Lib = {
@@ -54,7 +51,18 @@ When `Config.Debug.ToolsEnabled` is `true`, es_lib provides the debug panel and 
 | `IsRappelAvailable()` | `boolean` | Whether rappel conditions are met (altitude, seat, helicopter) |
 | `IsRappeling()` | `boolean` | Whether a rappel is currently in progress |
 | `StartRappel()` | — | Triggers a rappel from the helicopter |
+| `ConvertSpeed(speed)` | `number` | Converts a speed value to display units |
+| `ConvertAltitude(altitude)` | `number` | Converts an altitude value to display units |
+| `ConvertDistance(distance)` | `number` | Converts a distance value to display units |
 | `OpenPolCamDebugMenu()` | — | Opens the debug menu (requires `Config.Debug.ToolsEnabled = true`) |
+
+### Server Exports
+
+| Export | Returns | Description |
+|--------|---------|-------------|
+| `GetActiveAirFeeds()` | `table` | Returns a list of all active air feed entries (camera operators currently online) |
+| `GetAirFeedById(feedId)` | `table` | Returns a single air feed by its feed ID (e.g. `"air:123"`) |
+| `GetTrackedDatalinkTargets()` | `table` | Returns all currently tracked vehicle targets across all active air feeds |
 
 ## Configuration
 
@@ -63,9 +71,9 @@ All settings are in `config.lua`.
 ### Core
 
 ```lua
-Config.AllowedHelicopters = { "polmav", "gsd11bell", "maverick" }
+Config.AllowedHelicopters = { "polmav", "maverick" }
 Config.AllowedSeats = { -1, 0, 1, 2 }    -- Seats that can activate the camera (-1 = driver)
-Config.InstantLock = false                 -- false = uses es_lib progress bar for lock acquisition
+Config.InstantLock = false                 -- false = uses es_lib radial progress for lock acquisition
 ```
 
 ### Keybinds
@@ -156,8 +164,10 @@ Config.UI = {
     },
     HighContrast = {
         Enabled = true,
-        Theme = "blue",  -- Options: green, black, orange, red, purple, blue, pink, or hex (e.g. "#FF00FF")
+        Theme = "green",  -- Options: green, black, orange, red, purple, blue, pink, or hex (e.g. "#FF00FF")
     },
+    LRFStatus = "READY",       -- Laser range finder status text shown on HUD
+    SystemStatus = "NORM",     -- System status text shown on HUD
 }
 ```
 
@@ -187,6 +197,11 @@ Config.CameraLabels = {
     LiveryLabels = {
         ["polmav"] = {
             [0] = "LSPD",
+            [1] = "LSPD AIR-2",
+            [2] = "VINEWOOD AIR UNIT",
+        },
+        ["gsd11bell"] = {
+            [0] = "SAN ANDREAS STATE TROOPER",
             [1] = "LSPD AIR-2",
             [2] = "VINEWOOD AIR UNIT",
         },
@@ -346,6 +361,10 @@ Config.Debug = {
     ShowSharedState = false,
     LogEvents = false,            -- Log events to console
     LogScans = false,             -- Log scan results to console
+    RaycastColor = {0, 255, 255, 200},       -- RGBA color for raycast debug lines
+    DetectionColor = {255, 255, 0, 100},     -- RGBA color for detection radius debug
+    HitPointColor = {0, 255, 0, 255},        -- RGBA color for hit point debug marker
+    TargetBoxColor = {255, 128, 0, 200},     -- RGBA color for target bounding box debug
 }
 ```
 

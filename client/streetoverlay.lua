@@ -42,6 +42,7 @@ local SAMPLE_SPACING = 85.0          -- Larger spacing (fewer samples = fewer ra
 local LABEL_SPACING_SQ = 140.0 * 140.0 -- Spacing between identical street labels
 local MAX_LABELS = 8                 -- Fewer labels to reduce raycast + draw overhead
 local MAX_DRAW_DISTANCE_SQ = 500.0 * 500.0 -- Max distance from camera to draw a label
+local MAX_DRAW_PER_FRAME = 4         -- Limit draw calls per frame to reduce GPU pressure
 
 -- Text settings
 local TEXT_SCALE = 0.22
@@ -146,60 +147,64 @@ local function UpdateLabels(cx, cy, cz)
     LastUpdateY = cy
 end
 
--- Render thread
-CreateThread(function()
-    while true do
-        Wait(0)
-        
-        -- Skip if polcam not active or overlay disabled
-        if not PolCam or not PolCam.Active or not StreetOverlayEnabled then
-            Wait(200)
-            goto continue
-        end
-        
-        local camPos = PolCam.GroundCoords
-        if not camPos then
-            Wait(100)
-            goto continue
-        end
-        
-        -- Check if update needed (Require BOTH distance AND time cooldown)
-        local now = GetGameTimer()
-        if (now - LastUpdateTime) > UPDATE_INTERVAL then
-            local dx = camPos.x - LastUpdateX
-            local dy = camPos.y - LastUpdateY
-            
-            -- Update if distance threshold met OR if it's been a long time (force refresh)
-            if (dx*dx + dy*dy > UPDATE_DISTANCE_SQ) or (now - LastUpdateTime > UPDATE_INTERVAL * 4) then
-                UpdateLabels(camPos.x, camPos.y, camPos.z)
-            end
-        end
-        
-        -- Draw labels (optimized - distance culling, max per frame)
-        local drawn = 0
-        local MAX_DRAW_PER_FRAME = 4  -- limit draw calls per frame to reduce GPU pressure
-        for i = 1, LabelsCount do
-            if drawn >= MAX_DRAW_PER_FRAME then break end
-            local lbl = Labels[i]
-
-            local distDx = lbl.x - camPos.x
-            local distDy = lbl.y - camPos.y
-            if (distDx*distDx + distDy*distDy) < MAX_DRAW_DISTANCE_SQ then
-                local onScreen, sx, sy = GetScreenCoordFromWorldCoord(lbl.x, lbl.y, lbl.z)
-                if onScreen then
-                    SetTextScale(TEXT_SCALE, TEXT_SCALE)
-                    SetTextFont(0)
-                    SetTextColour(TEXT_R, TEXT_G, TEXT_B, TEXT_A)
-                    SetTextOutline()
-                    SetTextCentre(true)
-                    BeginTextCommandDisplayText("STRING")
-                    AddTextComponentSubstringPlayerName(lbl.name)
-                    EndTextCommandDisplayText(sx, sy)
-                    drawn = drawn + 1
-                end
-            end
-        end
-
-        ::continue::
+local function GetOverlayCameraPosition()
+    if not PolCam or not PolCam.Active or not StreetOverlayEnabled then
+        return nil
     end
-end)
+
+    return PolCam.GroundCoords
+end
+
+function UpdateStreetOverlay()
+    local camPos = GetOverlayCameraPosition()
+    if not camPos then
+        return
+    end
+
+    local now = GetGameTimer()
+    if LastUpdateTime == 0 then
+        UpdateLabels(camPos.x, camPos.y, camPos.z)
+        return
+    end
+
+    if (now - LastUpdateTime) <= UPDATE_INTERVAL then
+        return
+    end
+
+    local dx = camPos.x - LastUpdateX
+    local dy = camPos.y - LastUpdateY
+
+    if (dx * dx + dy * dy > UPDATE_DISTANCE_SQ) or (now - LastUpdateTime > UPDATE_INTERVAL * 4) then
+        UpdateLabels(camPos.x, camPos.y, camPos.z)
+    end
+end
+
+function RenderStreetOverlay()
+    local camPos = GetOverlayCameraPosition()
+    if not camPos then
+        return
+    end
+
+    local drawn = 0
+    for i = 1, LabelsCount do
+        if drawn >= MAX_DRAW_PER_FRAME then break end
+        local lbl = Labels[i]
+
+        local distDx = lbl.x - camPos.x
+        local distDy = lbl.y - camPos.y
+        if (distDx * distDx + distDy * distDy) < MAX_DRAW_DISTANCE_SQ then
+            local onScreen, sx, sy = GetScreenCoordFromWorldCoord(lbl.x, lbl.y, lbl.z)
+            if onScreen then
+                SetTextScale(TEXT_SCALE, TEXT_SCALE)
+                SetTextFont(0)
+                SetTextColour(TEXT_R, TEXT_G, TEXT_B, TEXT_A)
+                SetTextOutline()
+                SetTextCentre(true)
+                BeginTextCommandDisplayText("STRING")
+                AddTextComponentSubstringPlayerName(lbl.name)
+                EndTextCommandDisplayText(sx, sy)
+                drawn = drawn + 1
+            end
+        end
+    end
+end
