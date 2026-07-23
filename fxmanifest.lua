@@ -53,7 +53,8 @@ exports {
     'StartRappel',
     'ConvertSpeed',
     'ConvertAltitude',
-    'ConvertDistance'
+    'ConvertDistance',
+    'OpenPolCamDebugMenu'
 }
 
 server_exports {

@@ -15,7 +15,7 @@ Config.Keybinds = {
     CycleVision   = "V",
     LockTarget    = "SPACE",
     GroundLock    = "T",
-    PlaceMarker   = "G",
+    PlaceMarker   = "B", -- changed from "G" to avoid conflict with Config.Rappel.Keybind
     DeleteMarker  = "DELETE",
     ToggleDebug   = "F10",
 }

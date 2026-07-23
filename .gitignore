@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# FiveM / Lua runtime
+*.luac
+luac.out
+fxserver.exe
+
+# Local / environment
+.env
+.env.local
+.env.*.local
+*.tmp
+*.temp
+*.bak
