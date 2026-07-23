@@ -1,119 +1,182 @@
+<div align="center">
+
 # Cortex PolCam
 
-A FLIR-style police helicopter camera system for FiveM with target tracking, spotlight, hover/orbit autopilot, rappelling, and multi-crew synchronization.
+### A synchronised FLIR-style police helicopter camera system for FiveM
+
+Target tracking, thermal and night vision, ground lock, spotlight control, hover and orbit assistance, points of interest, rappelling and multi-crew camera hand-off.
+
+[![Release](https://img.shields.io/github/v/release/IEver3st/polcam?display_name=tag&sort=semver)](../../releases/latest)
+[![FiveM](https://img.shields.io/badge/platform-FiveM-F40552?logo=fivem)](https://fivem.net/)
+[![Lua](https://img.shields.io/badge/Lua-5.4-2C2D72?logo=lua)](https://www.lua.org/)
+[![Licence](https://img.shields.io/github/license/IEver3st/polcam)](./LICENSE)
+
+[Download](../../releases/latest) · [Configuration](#configuration) · [Exports](#exports)
+
+</div>
+
+<!--
+Add a cockpit or camera-overlay screenshot here.
+Recommended path: docs/media/polcam-camera.png
+-->
+
+## Overview
+
+Cortex PolCam is a configurable airborne camera resource for FiveM law-enforcement and public-safety roleplay servers.
+
+It provides a FLIR-inspired NUI, smooth zoom and camera motion, vehicle and pedestrian tracking, plate visibility logic, synchronised spotlights, points of interest, ground locking and shared camera state between helicopter crew members.
+
+The system is framework-light. Core camera behaviour is implemented in Lua with a small HTML, CSS and JavaScript NUI.
+
+## Features
+
+### Camera system
+
+- Smooth camera rotation and zoom
+- Configurable field-of-view limits
+- Ground-position locking
+- Street and postal overlays
+- Heading, altitude, speed and range information
+- Per-model and per-livery agency labels
+- High-contrast interface themes
+- Optional pilot HUD
+- Configurable native audio feedback
+
+### Vision modes
+
+- Standard camera view
+- Night vision
+- Thermal imaging
+- Configurable default mode and feature availability
+
+### Target tracking
+
+- Lock vehicles and pedestrians
+- Distance-scaled target acquisition
+- Configurable vehicle and pedestrian ranges
+- Smooth camera following
+- Plate visibility angle checks
+- Occlusion detection
+- Grace period before dropping an obstructed target
+- Persistent target labels
+- Entity-pool fallback scanning
+
+### Spotlight
+
+- Camera-following searchlight
+- Network-synchronised direction and position
+- Configurable brightness, range, radius and colour
+- Adjustable update and smoothing intervals
+
+### Helicopter assistance
+
+- Hover assistance
+- Orbit assistance around a selected position or target
+- Damage checks before autopilot operation
+- Configurable orbit radius and correction behaviour
+- Natural sway and gust parameters
+
+### Multi-crew operation
+
+- Shared camera state between helicopter occupants
+- Camera hand-off between operators
+- Restoration of tracked targets after takeover
+- Restoration of ground lock and vision mode
+- Server-side active air-feed registry
+- Datalink access to tracked vehicles
+
+### Points of interest
+
+- Place temporary world markers from the camera
+- Synchronise markers with other players
+- Configure maximum active markers and expiry time
+- Remove nearby markers through a keybind
+
+### Rappelling
+
+- Rappel from configured helicopter seats
+- Enforce minimum and maximum altitude
+- Whitelist or blacklist specific helicopter models
+- Synchronise rappel state to nearby players
 
 ## Dependencies
 
-| Resource | Required | Notes |
-|----------|----------|-------|
-| **es_lib** | **Yes** | Required for notifications, radial progress, and debug tools. Must be started before polcam. |
-| **es_hud** | Optional | Auto-detected. Hides the player HUD while the camera is active and optionally forces the aircraft HUD for the pilot. |
-| **nearest-postal** | Optional | Provides postal code data for the camera overlay. |
+| Resource | Required | Purpose |
+|---|---:|---|
+| `es_lib` | Yes | Notifications, target-lock progress and debug tools |
+| `es_hud` | No | Hides the player HUD and can force the aircraft HUD |
+| `nearest-postal` | No | Supplies postal data for the camera overlay |
 
-## es_hud Compatibility
+`es_lib` must start before `polcam`.
 
-PolCam integrates with es_hud to manage HUD visibility while the camera is active. When the camera activates, it calls `exports.es_hud:hideHud('polcam')` to hide the player HUD, and `exports.es_hud:showHud('polcam')` when deactivated. es_hud recognizes `'polcam'` as a visibility reason and handles it accordingly.
+## Installation
 
-The pilot can optionally have the aircraft HUD forced on via `exports.es_hud:setForceAircraftHud()`.
+1. Download the [latest release](../../releases/latest) or clone the repository.
+2. Place the resource in the server's resources directory.
+3. Ensure the folder is named `polcam`, unless all references are updated.
+4. Install and configure `es_lib`.
+5. Review `config.lua`.
+6. Add the resources to `server.cfg` in dependency order.
 
-Configure this behavior in `config.lua`:
-
-```lua
-Config.EsHud = {
-    Enabled = true,                  -- Enable es_hud integration
-    AutoDetect = true,               -- Auto-detect if es_hud is running
-    ShowAircraftHudForPilot = false,  -- Force aircraft HUD for the pilot while camera is active
-    FallbackAircraftHud = false,      -- Use polcam's built-in aircraft HUD if es_hud is unavailable
-}
+```cfg
+ensure es_lib
+ensure es_hud
+ensure nearest-postal
+ensure polcam
 ```
 
-## es_lib Integration
+Only `es_lib` is required. Remove optional resources from the configuration when they are not installed.
 
-es_lib is used for notifications, the target lock radial progress, and debug tooling.
+Restart the server and test the camera in a configured helicopter model.
 
-```lua
-Config.Lib = {
-    Notify = 'auto'  -- 'auto' uses es_lib for notifications
-}
-```
+## Default controls
 
-When `Config.Debug.ToolsEnabled` is `true`, es_lib provides the debug panel and debug menu (bound to F10). If es_lib is not running, all debug features are automatically disabled.
+| Action | Default key |
+|---|---|
+| Toggle camera | `E` |
+| Toggle camera UI | `H` |
+| Toggle street overlay | `N` |
+| Toggle hover assistance | `X` |
+| Toggle orbit assistance | `O` |
+| Toggle spotlight | `L` |
+| Cycle spotlight colour | `K` |
+| Cycle vision mode | `V` |
+| Lock or unlock target | `SPACE` |
+| Lock camera to ground | `T` |
+| Place point of interest | `G` |
+| Delete nearest marker | `DELETE` |
+| Open debug tools | `F10` |
 
-## Exports
-
-### Client Exports
-
-| Export | Returns | Description |
-|--------|---------|-------------|
-| `IsPolCamActive()` | `boolean` | Whether the camera is currently active |
-| `GetCurrentTarget()` | `entity, table` | The locked target entity and target info table |
-| `GetCameraHeading()` | `number` | Current camera heading in degrees |
-| `IsRappelAvailable()` | `boolean` | Whether rappel conditions are met (altitude, seat, helicopter) |
-| `IsRappeling()` | `boolean` | Whether a rappel is currently in progress |
-| `StartRappel()` | — | Triggers a rappel from the helicopter |
-| `ConvertSpeed(speed)` | `number` | Converts a speed value to display units |
-| `ConvertAltitude(altitude)` | `number` | Converts an altitude value to display units |
-| `ConvertDistance(distance)` | `number` | Converts a distance value to display units |
-| `OpenPolCamDebugMenu()` | — | Opens the debug menu (requires `Config.Debug.ToolsEnabled = true`) |
-
-### Server Exports
-
-| Export | Returns | Description |
-|--------|---------|-------------|
-| `GetActiveAirFeeds()` | `table` | Returns a list of all active air feed entries (camera operators currently online) |
-| `GetAirFeedById(feedId)` | `table` | Returns a single air feed by its feed ID (e.g. `"air:123"`) |
-| `GetTrackedDatalinkTargets()` | `table` | Returns all currently tracked vehicle targets across all active air feeds |
+All keybinds are configurable in `config.lua`.
 
 ## Configuration
 
-All settings are in `config.lua`.
+All settings are held in `config.lua`.
 
-### Core
-
-```lua
-Config.AllowedHelicopters = { "polmav", "maverick" }
-Config.AllowedSeats = { -1, 0, 1, 2 }    -- Seats that can activate the camera (-1 = driver)
-Config.InstantLock = false                 -- false = uses es_lib radial progress for lock acquisition
-```
-
-### Keybinds
+### Core access
 
 ```lua
-Config.Keybinds = {
-    ToggleCamera  = "E",       -- Activate/deactivate camera
-    ToggleUI      = "H",       -- Toggle camera UI overlay
-    ToggleStreets = "N",       -- Toggle street name overlay
-    ToggleHover   = "X",       -- Toggle hover autopilot
-    ToggleOrbit   = "O",       -- Toggle orbit autopilot
-    Spotlight     = "L",       -- Toggle spotlight
-    CycleSpotlightColor = "K", -- Cycle spotlight color
-    CycleVision   = "V",       -- Cycle vision mode (normal/NV/thermal)
-    LockTarget    = "SPACE",   -- Lock/unlock target
-    GroundLock    = "T",       -- Lock camera to ground position
-    PlaceMarker   = "G",       -- Place a POI marker
-    DeleteMarker  = "DELETE",  -- Delete nearest marker
-    ToggleDebug   = "F10",     -- Toggle debug menu (requires ToolsEnabled)
+Config.AllowedHelicopters = {
+    "polmav",
+    "maverick"
 }
+
+Config.AllowedSeats = { -1, 0, 1, 2 }
+Config.InstantLock = false
 ```
 
 ### Camera
 
 ```lua
 Config.Camera = {
-    MinZoom = 1.0,              -- Minimum zoom level
-    MaxZoom = 30.0,             -- Maximum zoom level
-    DefaultZoom = 5.0,          -- Starting zoom level
-    ZoomSpeed = 2.0,            -- Zoom input speed
-    SmoothZoomSpeed = 8.0,      -- Zoom interpolation speed
-    DefaultFOV = 50.0,          -- Default field of view
-    MinFOV = 2.0,               -- Minimum FOV (max zoom)
-    MaxFOV = 70.0,              -- Maximum FOV (min zoom)
-    RotationSpeed = 3.0,        -- Camera rotation speed
-    MaxVerticalAngle = 89.0,    -- Max upward angle
-    MinVerticalAngle = -30.0,   -- Max downward angle
-    ZoomSensitivityMinMultiplier = 0.20,
-    CameraOffset = vector3(0.0, 2.5, -1.5),
-    RenderDistance = 1000.0,    -- Max render distance
+    MinZoom = 1.0,
+    MaxZoom = 30.0,
+    DefaultZoom = 5.0,
+    DefaultFOV = 50.0,
+    MinFOV = 2.0,
+    MaxFOV = 70.0,
+    RotationSpeed = 3.0,
+    RenderDistance = 1000.0
 }
 ```
 
@@ -122,90 +185,29 @@ Config.Camera = {
 ```lua
 Config.Tracking = {
     Enabled = true,
-    LockDurationMs = 1200,                -- Lock acquisition time (when InstantLock = false)
-    TrackVehicles = true,                  -- Allow locking vehicles
-    TrackPeds = true,                      -- Allow locking pedestrians
-    TrackingSpeed = 12.0,                  -- Camera follow speed when locked
-    DetectionBaseRadius = 3.0,             -- Base detection radius
-    DetectionScaling = 0.025,              -- Detection radius scaling with distance
-    DetectionMaxRadius = 35.0,             -- Max detection radius
-    TargetingMaxDistanceVehicles = 1000.0, -- Max lock range for vehicles
-    TargetingMaxDistancePeds = 1000.0,     -- Max lock range for peds
-    UsePoolFallbackTargeting = true,       -- Fallback to entity pool scanning
-    PlateVisibilityAngle = 45.0,           -- Angle threshold for plate readability
-    OcclusionEnabled = true,               -- Drop lock when target goes behind objects
-    OcclusionGracePeriodMs = 3000,         -- Grace period before dropping occluded target
-    OcclusionCheckIntervalMs = 150,        -- How often to check occlusion
-    OcclusionNearTargetTolerance = 2.0,    -- Tolerance for near-target occlusion checks
+    LockDurationMs = 1200,
+    TrackVehicles = true,
+    TrackPeds = true,
+    TrackingSpeed = 12.0,
+    TargetingMaxDistanceVehicles = 1000.0,
+    TargetingMaxDistancePeds = 1000.0,
+    OcclusionEnabled = true,
+    OcclusionGracePeriodMs = 3000
 }
 ```
 
-### UI
-
-```lua
-Config.UI = {
-    PilotHUD = {
-        Enabled = true,
-        Position = "top-right",  -- Pilot HUD position
-        ShowStreet = true,       -- Show street name
-        ShowHeading = true,      -- Show heading
-    },
-    TargetLabel = {
-        Enabled = true,
-        ShowWhenCameraActive = true,   -- Show target label while camera is on
-        ShowWhenCameraOff = true,      -- Show target label after camera is off (persistent tracking)
-        ShowWhilePersistent = true,    -- Show during persistent tracking
-        MaxDistance = 1500.0,          -- Max render distance for labels
-        HeightOffsetPed = 1.0,         -- Label height offset for peds
-        HeightOffsetVehicle = 1.6,     -- Label height offset for vehicles
-        LabelSmoothingSpeed = 12.0,
-        Color = {0, 255, 0, 230},      -- RGBA (overridden if FollowHighContrast is true)
-        FollowHighContrast = true,     -- Match label color to high contrast theme
-    },
-    HighContrast = {
-        Enabled = true,
-        Theme = "green",  -- Options: green, black, orange, red, purple, blue, pink, or hex (e.g. "#FF00FF")
-    },
-    LRFStatus = "READY",       -- Laser range finder status text shown on HUD
-    SystemStatus = "NORM",     -- System status text shown on HUD
-}
-```
-
-### Vision Modes
+### Vision
 
 ```lua
 Config.Vision = {
-    DefaultMode = "normal",                       -- Starting vision mode
-    NightVision = { Enabled = true, Intensity = 0.7 },
-    Thermal = { Enabled = true },
-}
-```
-
-### Camera Labels
-
-Per-model and per-livery agency labels displayed on the camera overlay.
-
-```lua
-Config.CameraLabels = {
-    Enabled = true,
-    DefaultLabel = "LOS SANTOS POLICE DEPARTMENT",
-    ModelLabels = {
-        ["polmav"]    = "LOS SANTOS POLICE DEPARTMENT",
-        ["gsd11bell"] = "BLAINE COUNTY SHERIFF'S OFFICE",
-        ["maverick"]  = "SAN ANDREAS STATE POLICE",
+    DefaultMode = "normal",
+    NightVision = {
+        Enabled = true,
+        Intensity = 0.7
     },
-    LiveryLabels = {
-        ["polmav"] = {
-            [0] = "LSPD",
-            [1] = "LSPD AIR-2",
-            [2] = "VINEWOOD AIR UNIT",
-        },
-        ["gsd11bell"] = {
-            [0] = "SAN ANDREAS STATE TROOPER",
-            [1] = "LSPD AIR-2",
-            [2] = "VINEWOOD AIR UNIT",
-        },
-    },
+    Thermal = {
+        Enabled = true
+    }
 }
 ```
 
@@ -214,176 +216,251 @@ Config.CameraLabels = {
 ```lua
 Config.Spotlight = {
     Enabled = true,
-    SyncWithCamera = true,    -- Spotlight follows camera direction
+    SyncWithCamera = true,
     Brightness = 10.0,
     Range = 400.0,
     Radius = 10.0,
-    Color = {170, 185, 255},  -- RGB
-    NetSync = {
-        PositionIntervalMs = 150,
-        BroadcastIntervalMs = 150,
-        MinMoveDistance = 0.25,
-        SmoothingSpeed = 12.0,
-    },
+    Color = { 170, 185, 255 }
 }
 ```
 
-### Points of Interest
+### Points of interest
 
 ```lua
 Config.POI = {
     Enabled = true,
-    MaxPOIs = 10,           -- Max active POI markers
-    ExpiryTime = 300,       -- POI lifetime in seconds
-    SyncToOthers = true,    -- Sync POIs to other players
+    MaxPOIs = 10,
+    ExpiryTime = 300,
+    SyncToOthers = true
 }
 ```
 
-### Rappel
+### Rappelling
 
 ```lua
 Config.Rappel = {
     Enabled = true,
     Keybind = "G",
-    MinAltitude = 15,        -- Minimum altitude in feet
-    MaxAltitude = 150,       -- Maximum altitude in feet
-    AllowedSeats = {1, 2},   -- Seats that can rappel
-    SyncEnabled = true,      -- Sync rappel to other players
-    AllowedHashes = {},      -- Whitelist specific vehicle hashes (empty = all allowed helicopters)
-    DisableHashes = {},      -- Blacklist specific vehicle hashes
+    MinAltitude = 15,
+    MaxAltitude = 150,
+    AllowedSeats = { 1, 2 },
+    SyncEnabled = true,
+    AllowedHashes = {},
+    DisableHashes = {}
 }
 ```
 
-### Helicopter Control
-
-```lua
-Config.HeliControl = {
-    HoverEnabled = true,              -- Enable hover autopilot
-    OrbitEnabled = true,              -- Enable orbit autopilot
-    MinOrbitRadius = 30.0,            -- Minimum orbit radius
-    HoverMaxDrift = 0.45,
-    HoverZStiffness = 2.0,
-    HoverBrakeFactor = 1.0,
-    MinAirborneHeight = 2.0,
-    OrbitRadialStiffness = 1.2,
-    OrbitRadialDamping = 0.6,
-    OrbitVelocitySmoothing = 2.2,
-    OrbitMinTangentScale = 0.55,
-    OrbitRadialMaxCorrection = 12.0,
-    OrbitMaxAccel = 8.0,
-    OrbitCenterLerp = 2.0,
-    OrbitHeadingSmoothing = 2.2,
-    OrbitSwayAmplitude = 1.6,         -- Turbulence/sway amplitude
-    OrbitSwayFrequency = 0.55,
-    OrbitSwayTangentBias = 1.25,
-    OrbitSwayRadialBias = 0.9,
-    OrbitSwayGustAmplitude = 0.85,
-    OrbitSwayGustFrequency = 0.22,
-    MinEngineHealth = 100.0,          -- Minimum engine health for autopilot
-    MinBodyHealth = 100.0,            -- Minimum body health for autopilot
-    AvionicsDamagedMessage = true,    -- Notify when avionics are damaged
-}
-```
-
-### Shared Camera
-
-Multi-crew camera state synchronization.
+### Shared camera
 
 ```lua
 Config.SharedCamera = {
     Enabled = true,
-    SyncIntervalMs = 200,              -- State sync interval
-    StateTimeoutMs = 300000,           -- State timeout (5 minutes)
-    RestoreTrackedTarget = true,       -- Restore locked target on camera takeover
-    RestoreGroundLock = true,          -- Restore ground lock on takeover
-    RestoreVisionMode = true,          -- Restore vision mode on takeover
+    SyncIntervalMs = 200,
+    StateTimeoutMs = 300000,
+    RestoreTrackedTarget = true,
+    RestoreGroundLock = true,
+    RestoreVisionMode = true
 }
 ```
 
-### Postal Data
+## HUD integration
+
+When `es_hud` is enabled, PolCam hides the normal player HUD while the camera is active:
 
 ```lua
-Config.Postal = {
-    Enabled = true,
-    ExportResource = "nearest-postal",        -- Resource containing postal data
-    PostalFile = "ocrp-postals.json",         -- Postal JSON file name
-}
+exports.es_hud:hideHud('polcam')
+exports.es_hud:showHud('polcam')
 ```
 
-### Sounds
-
-All sounds use GTA native audio banks. Set `Config.Sounds.Enabled = false` to disable all sounds.
+The pilot can optionally retain a forced aircraft HUD through:
 
 ```lua
-Config.Sounds = {
+exports.es_hud:setForceAircraftHud()
+```
+
+Example configuration:
+
+```lua
+Config.EsHud = {
     Enabled = true,
-    CameraOn           = { audioBank = "DLC_HEI_HACKER_SOUNDS", audioName = "Hacker_Keypad_Submit_Success" },
-    CameraOff          = { audioBank = "DLC_HEI_HACKER_SOUNDS", audioName = "Hacker_Keypad_Error" },
-    CameraTransitionIn = { audioBank = "PLAYER_SWITCH_CUSTOM_SOUNDSET", audioName = "Short_Transition_In" },
-    CameraTransitionOut= { audioBank = "PLAYER_SWITCH_CUSTOM_SOUNDSET", audioName = "1st_Person_Transition" },
-    ZoomIn             = { audioBank = "DLC_HEIST_HACKING_SNAKE_SOUNDS", audioName = "HACKING_CLICK" },
-    ZoomOut            = { audioBank = "DLC_HEIST_HACKING_SNAKE_SOUNDS", audioName = "HACKING_CLICK" },
-    VisionSwitch       = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "PICK_UP_SOUND" },
-    TargetLocked       = { audioBank = "DLC_GR_MOC_Computer_Sounds", audioName = "Select_Mission_Launch" },
-    TargetLost         = { audioBank = "GTAO_FM_Events_Soundset", audioName = "OOB_Cancel" },
-    MarkerPlaced       = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "WAYPOINT_SET" },
-    SpotlightOn        = { audioBank = "DLC_XM_FACILITY_AMBIENT_SOUNDS", audioName = "Activate_Privacy_Glass" },
-    SpotlightOff       = { audioBank = "DLC_XM_FACILITY_AMBIENT_SOUNDS", audioName = "Deactivate_Privacy_Glass" },
-    HoverOn            = { audioBank = "DLC_GR_Steal_Railguns_Sounds", audioName = "Hack_Success" },
-    HoverOff           = { audioBank = "DLC_Biker_Computer_Sounds", audioName = "Exit" },
-    OrbitOn            = { audioBank = "DLC_sum20_Business_Battle_AC_Sounds", audioName = "Hack_Success" },
-    OrbitOff           = { audioBank = "DLC_sum20_Business_Battle_AC_Sounds", audioName = "Hack_Failure" },
-    GroundLockOn       = { audioBank = "DLC_HEIST_HACKING_SNAKE_SOUNDS", audioName = "HACKING_SUCCESS" },
-    GroundLockOff      = { audioBank = "DLC_HEIST_HACKING_SNAKE_SOUNDS", audioName = "HACKING_FAILURE" },
-    Click              = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "SELECT" },
-    Confirm            = { audioBank = "DLC_HEI_HACKER_SOUNDS", audioName = "SCANNED_ID_OK" },
-    Alert              = { audioBank = "HUD_FRONTEND_DEFAULT_SOUNDSET", audioName = "ERROR" },
-    SystemAlert        = { audioBank = "DLC_HEIST_BIOLAB_PREP_SOUNDS", audioName = "Power_Down" },
-    CCTVLoop           = { audioBank = "DLC_Arena_CCTV_SOUNDSET", audioName = "Background" },
+    AutoDetect = true,
+    ShowAircraftHudForPilot = false,
+    FallbackAircraftHud = false
 }
 ```
 
-### Debug
+## Camera labels
+
+Agency labels can be selected by vehicle model and livery index.
+
+```lua
+Config.CameraLabels = {
+    Enabled = true,
+    DefaultLabel = "LOS SANTOS POLICE DEPARTMENT",
+
+    ModelLabels = {
+        ["polmav"] = "LOS SANTOS POLICE DEPARTMENT",
+        ["maverick"] = "SAN ANDREAS STATE POLICE"
+    },
+
+    LiveryLabels = {
+        ["polmav"] = {
+            [0] = "LSPD",
+            [1] = "LSPD AIR-2",
+            [2] = "VINEWOOD AIR UNIT"
+        }
+    }
+}
+```
+
+## Exports
+
+### Client exports
+
+| Export | Returns | Purpose |
+|---|---|---|
+| `IsPolCamActive()` | `boolean` | Whether the camera is active |
+| `GetCurrentTarget()` | `entity, table` | Current target entity and metadata |
+| `GetCameraHeading()` | `number` | Current camera heading |
+| `IsRappelAvailable()` | `boolean` | Whether rappel conditions are satisfied |
+| `IsRappeling()` | `boolean` | Whether the player is rappelling |
+| `StartRappel()` | - | Starts a rappel |
+| `ConvertSpeed(speed)` | `number` | Converts speed to configured units |
+| `ConvertAltitude(altitude)` | `number` | Converts altitude to configured units |
+| `ConvertDistance(distance)` | `number` | Converts distance to configured units |
+| `OpenPolCamDebugMenu()` | - | Opens debug tools when enabled |
+
+Example:
+
+```lua
+local active = exports.polcam:IsPolCamActive()
+local target, targetInfo = exports.polcam:GetCurrentTarget()
+
+if active and target then
+    print(("Tracking entity %s"):format(target))
+end
+```
+
+### Server exports
+
+| Export | Returns | Purpose |
+|---|---|---|
+| `GetActiveAirFeeds()` | `table` | Lists active airborne camera feeds |
+| `GetAirFeedById(feedId)` | `table` | Returns one feed by identifier |
+| `GetTrackedDatalinkTargets()` | `table` | Returns vehicles tracked by active feeds |
+
+Example:
+
+```lua
+local feeds = exports.polcam:GetActiveAirFeeds()
+
+for _, feed in ipairs(feeds) do
+    print(json.encode(feed))
+end
+```
+
+## Debugging
+
+Debug tools are disabled by default.
 
 ```lua
 Config.Debug = {
-    Enabled = false,              -- Enable debug visualizations
-    ToolsEnabled = false,         -- Enable debug menu and keybind (requires es_lib)
-    ShowRaycast = true,           -- Draw raycast line
-    ShowDetectionRadius = false,  -- Draw detection sphere
-    ShowHitPoint = false,         -- Draw hit point marker
-    ShowTargetBox = false,        -- Draw target bounding box
-    ShowDebugPanel = false,       -- Show es_lib debug panel
-    ShowDistanceInfo = false,
-    ShowRadiusInfo = false,
-    ShowEntityInfo = false,
-    ShowScanDetails = false,
-    ShowSharedState = false,
-    LogEvents = false,            -- Log events to console
-    LogScans = false,             -- Log scan results to console
-    RaycastColor = {0, 255, 255, 200},       -- RGBA color for raycast debug lines
-    DetectionColor = {255, 255, 0, 100},     -- RGBA color for detection radius debug
-    HitPointColor = {0, 255, 0, 255},        -- RGBA color for hit point debug marker
-    TargetBoxColor = {255, 128, 0, 200},     -- RGBA color for target bounding box debug
+    Enabled = false,
+    ToolsEnabled = false,
+    ShowRaycast = true,
+    ShowDetectionRadius = false,
+    ShowHitPoint = false,
+    ShowTargetBox = false,
+    ShowDebugPanel = false,
+    LogEvents = false,
+    LogScans = false
 }
 ```
 
-### Update Intervals
+When enabled, the resource can display raycasts, hit points, target bounds, detection radii and synchronisation state. The F10 debug menu requires `es_lib`.
 
-```lua
-Config.Intervals = {
-    StateSync = 200,          -- Camera state sync interval (ms)
-    ClaimTimeout = 5000,      -- Camera claim timeout (ms)
-    UI = {
-        Fast = 50,            -- Fast UI update rate (ms)
-        Medium = 200,         -- Medium UI update rate (ms)
-        Slow = 1000,          -- Slow UI update rate (ms)
-    },
-    Heartbeat = {
-        BaseCheck = 1000,
-        PilotHUDUpdate = 1000,
-        FastUpdate = 200,
-    },
-    GroundZCheckOffset = 50.0,
-}
+Do not leave verbose debug logging enabled on a production server unless it is required for diagnosis.
+
+## Architecture
+
+```text
+polcam/
+├── client/
+│   ├── camera.lua           # Camera lifecycle and movement
+│   ├── vision.lua           # Night and thermal modes
+│   ├── targeting.lua        # Entity acquisition and tracking
+│   ├── spotlight.lua        # Searchlight control and sync
+│   ├── helicontrol.lua      # Hover and orbit assistance
+│   ├── poi.lua              # Shared world markers
+│   ├── rappel.lua           # Rappel checks and execution
+│   ├── streetoverlay.lua    # Location display
+│   ├── sounds.lua           # Native audio cues
+│   ├── debug.lua            # Diagnostic tools
+│   └── main.lua             # Resource orchestration
+├── server/
+│   └── main.lua             # Air feeds, datalink and network state
+├── html/
+│   ├── index.html           # NUI structure
+│   ├── style.css            # Camera interface
+│   └── script.js            # NUI behaviour
+├── config.lua
+└── fxmanifest.lua
 ```
+
+## Performance considerations
+
+The default configuration separates update work into fast, medium and slow intervals. Before lowering intervals:
+
+- Profile the resource with realistic player counts
+- Check spotlight and camera synchronisation traffic
+- Test several simultaneous air units
+- Confirm target scanning does not create avoidable entity-pool work
+- Keep debug rendering disabled in production
+
+More frequent synchronisation is not automatically smoother if network latency or client frame time is already the limiting factor.
+
+## Compatibility
+
+PolCam uses FiveM's Cerulean resource format and Lua 5.4.
+
+The core resource is not tied directly to QBCore, Qbox or ESX. Server integrations can consume the provided client and server exports.
+
+## Project status
+
+PolCam has been released publicly as a complete open-source resource. Maintenance and future feature development are best-effort rather than guaranteed.
+
+Forks and pull requests are welcome, particularly where changes remain configurable and do not impose a specific server framework.
+
+## Contributing
+
+When reporting an issue, include:
+
+- FiveM server artefact version
+- OneSync configuration
+- Helicopter model and seat
+- Relevant `config.lua` values
+- Whether `es_lib`, `es_hud` and `nearest-postal` are running
+- Client and server console output
+- Reproduction steps
+
+Keep framework-specific behaviour behind configuration or an integration layer.
+
+## Licence
+
+Cortex PolCam is released under the [MIT Licence](./LICENSE).
+
+## Credits
+
+Designed and developed in collaboration with GSD Modifications.
+
+## Disclaimer
+
+Cortex PolCam is an independent FiveM community resource. It is not affiliated with or endorsed by Rockstar Games, Take-Two Interactive or Cfx.re.
+
+---
+
+<div align="center">
+
+A capable air unit is useful. A configurable one is less troublesome.
+
+</div>
