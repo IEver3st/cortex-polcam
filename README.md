@@ -103,29 +103,29 @@ The system is framework-light. Core camera behaviour is implemented in Lua with 
 
 | Resource | Required | Purpose |
 |---|---:|---|
-| `es_lib` | Yes | Notifications, target-lock progress and debug tools |
-| `es_hud` | No | Hides the player HUD and can force the aircraft HUD |
+| `cortex-lib` | Yes | Notifications, target-lock progress and debug tools |
+| `cortex-hud` | No | Hides the player HUD and can force the aircraft HUD |
 | `nearest-postal` | No | Supplies postal data for the camera overlay |
 
-`es_lib` must start before `polcam`.
+`cortex-lib` must start before `cortex_polcam`.
 
 ## Installation
 
 1. Download the [latest release](../../releases/latest) or clone the repository.
 2. Place the resource in the server's resources directory.
-3. Ensure the folder is named `polcam`, unless all references are updated.
-4. Install and configure `es_lib`.
+3. Ensure the folder is named `cortex_polcam`.
+4. Install and configure `cortex-lib`.
 5. Review `config.lua`.
 6. Add the resources to `server.cfg` in dependency order.
 
 ```cfg
-ensure es_lib
-ensure es_hud
+ensure cortex-lib
+ensure cortex-hud
 ensure nearest-postal
-ensure polcam
+ensure cortex_polcam
 ```
 
-Only `es_lib` is required. Remove optional resources from the configuration when they are not installed.
+Only `cortex-lib` is required. Remove optional resources from the configuration when they are not installed.
 
 Restart the server and test the camera in a configured helicopter model.
 
@@ -265,17 +265,17 @@ Config.SharedCamera = {
 
 ## HUD integration
 
-When `es_hud` is enabled, PolCam hides the normal player HUD while the camera is active:
+When `cortex-hud` is enabled, PolCam hides the normal player HUD while the camera is active:
 
 ```lua
-exports.es_hud:hideHud('polcam')
-exports.es_hud:showHud('polcam')
+exports['cortex-hud']:hideHud('polcam')
+exports['cortex-hud']:showHud('polcam')
 ```
 
 The pilot can optionally retain a forced aircraft HUD through:
 
 ```lua
-exports.es_hud:setForceAircraftHud()
+exports['cortex-hud']:setForceAircraftHud()
 ```
 
 Example configuration:
@@ -333,8 +333,8 @@ Config.CameraLabels = {
 Example:
 
 ```lua
-local active = exports.polcam:IsPolCamActive()
-local target, targetInfo = exports.polcam:GetCurrentTarget()
+local active = exports['cortex_polcam']:IsPolCamActive()
+local target, targetInfo = exports['cortex_polcam']:GetCurrentTarget()
 
 if active and target then
     print(("Tracking entity %s"):format(target))
@@ -352,7 +352,7 @@ end
 Example:
 
 ```lua
-local feeds = exports.polcam:GetActiveAirFeeds()
+local feeds = exports['cortex_polcam']:GetActiveAirFeeds()
 
 for _, feed in ipairs(feeds) do
     print(json.encode(feed))
@@ -377,14 +377,14 @@ Config.Debug = {
 }
 ```
 
-When enabled, the resource can display raycasts, hit points, target bounds, detection radii and synchronisation state. The F10 debug menu requires `es_lib`.
+When enabled, the resource can display raycasts, hit points, target bounds, detection radii and synchronisation state. The F10 debug menu requires `cortex-lib`.
 
 Do not leave verbose debug logging enabled on a production server unless it is required for diagnosis.
 
 ## Architecture
 
 ```text
-polcam/
+cortex_polcam/
 ├── client/
 │   ├── camera.lua           # Camera lifecycle and movement
 │   ├── vision.lua           # Night and thermal modes
@@ -439,7 +439,7 @@ When reporting an issue, include:
 - OneSync configuration
 - Helicopter model and seat
 - Relevant `config.lua` values
-- Whether `es_lib`, `es_hud` and `nearest-postal` are running
+- Whether `cortex-lib`, `cortex-hud` and `nearest-postal` are running
 - Client and server console output
 - Reproduction steps
 

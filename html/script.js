@@ -64,6 +64,134 @@ function getDtSeconds() {
 
 
 const Elements = {};
+const HUD_EDITABLE_SELECTORS = {
+    'top-left': '.top-left-panel',
+    'top-right': '.top-right-panel',
+    'bottom-left': '.bottom-left-panel',
+    'bottom-right': '.bottom-right-panel',
+    compass: '.compass-container',
+    gimbal: '.gimbal-display',
+    crosshair: '.crosshair-container',
+    'pilot-hud': '#pilot-hud'
+};
+const ALLOWED_NUI_CALLBACKS = new Set(['saveHUDPosition', 'closeHUDEdit']);
+const SavedHudPositions = {};
+let activeHudDrag = null;
+
+async function postNui(route, payload = {}, timeoutMs = 3000) {
+    if (!ALLOWED_NUI_CALLBACKS.has(route) || typeof GetParentResourceName !== 'function') {
+        return { ok: false, skipped: true };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(`https://${GetParentResourceName()}/${route}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`NUI callback failed (${response.status})`);
+        return await response.json();
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+function applyHudPosition(id, position) {
+    const selector = HUD_EDITABLE_SELECTORS[id];
+    const element = selector && document.querySelector(selector);
+    const x = Number(position && position.x);
+    const y = Number(position && position.y);
+    if (!element || !Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const rect = element.getBoundingClientRect();
+    const availableX = Math.max(0, window.innerWidth - rect.width);
+    const availableY = Math.max(0, window.innerHeight - rect.height);
+    element.style.position = 'fixed';
+    element.style.left = `${clamp(x, 0, 100) / 100 * availableX}px`;
+    element.style.top = `${clamp(y, 0, 100) / 100 * availableY}px`;
+    element.style.right = 'auto';
+    element.style.bottom = 'auto';
+    element.style.transform = 'none';
+}
+
+function applyHudPositions(positions) {
+    if (!positions || typeof positions !== 'object') return;
+    for (const id of Object.keys(HUD_EDITABLE_SELECTORS)) {
+        if (!positions[id]) continue;
+        SavedHudPositions[id] = positions[id];
+        applyHudPosition(id, positions[id]);
+    }
+}
+
+function setHudEditing(enabled) {
+    document.body.classList.toggle('hud-editing', enabled);
+    for (const [id, selector] of Object.entries(HUD_EDITABLE_SELECTORS)) {
+        const element = document.querySelector(selector);
+        if (!element) continue;
+        element.dataset.hudElementId = id;
+        element.classList.toggle('hud-editable', enabled);
+    }
+    if (!enabled) activeHudDrag = null;
+}
+
+function initializeHudEditor() {
+    for (const [id, selector] of Object.entries(HUD_EDITABLE_SELECTORS)) {
+        const element = document.querySelector(selector);
+        if (!element) continue;
+        element.dataset.hudElementId = id;
+        element.addEventListener('pointerdown', (event) => {
+            if (!document.body.classList.contains('hud-editing') || event.button !== 0) return;
+            const rect = element.getBoundingClientRect();
+            activeHudDrag = {
+                id,
+                element,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top
+            };
+            element.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+        });
+    }
+
+    document.addEventListener('pointermove', (event) => {
+        if (!activeHudDrag) return;
+        const { element, offsetX, offsetY } = activeHudDrag;
+        const rect = element.getBoundingClientRect();
+        const left = clamp(event.clientX - offsetX, 0, Math.max(0, window.innerWidth - rect.width));
+        const top = clamp(event.clientY - offsetY, 0, Math.max(0, window.innerHeight - rect.height));
+        element.style.position = 'fixed';
+        element.style.left = `${left}px`;
+        element.style.top = `${top}px`;
+        element.style.right = 'auto';
+        element.style.bottom = 'auto';
+        element.style.transform = 'none';
+    });
+
+    document.addEventListener('pointerup', () => {
+        if (!activeHudDrag) return;
+        const { id, element } = activeHudDrag;
+        activeHudDrag = null;
+        const rect = element.getBoundingClientRect();
+        const availableX = Math.max(1, window.innerWidth - rect.width);
+        const availableY = Math.max(1, window.innerHeight - rect.height);
+        const position = {
+            x: clamp(rect.left / availableX * 100, 0, 100),
+            y: clamp(rect.top / availableY * 100, 0, 100)
+        };
+        SavedHudPositions[id] = position;
+        postNui('saveHUDPosition', { id, ...position }).catch(() => {});
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !document.body.classList.contains('hud-editing')) return;
+        postNui('closeHUDEdit').catch(() => {});
+    });
+
+    window.addEventListener('resize', () => applyHudPositions(SavedHudPositions));
+}
 
 
 
@@ -142,6 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     updateTime();
     setInterval(updateTime, 1000);
+    initializeHudEditor();
 });
 
 
@@ -149,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.addEventListener('message', (event) => {
     const data = event.data;
+    if (!data || typeof data !== 'object' || typeof data.action !== 'string') return;
 
     switch (data.action) {
         case 'show':
@@ -201,6 +331,12 @@ window.addEventListener('message', (event) => {
         case 'applyClientSettings':
             applyClientSettings(data.data);
             break;
+        case 'startEditing':
+            setHudEditing(true);
+            break;
+        case 'stopEditing':
+            setHudEditing(false);
+            break;
     }
 });
 
@@ -212,6 +348,7 @@ function showHUD(data) {
     Elements.container.classList.remove('hidden');
     Elements.container.classList.remove('hud-fade-out');
     Elements.container.classList.add('hud-fade-in');
+    applyHudPositions(data.positions);
 
     if (data.visionMode) {
         setVisionMode(data.visionMode);

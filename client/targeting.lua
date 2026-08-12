@@ -55,16 +55,16 @@ local CreateThread = CreateThread
 local Wait = Wait
 
 local function isEsLibStarted()
-    return GetResourceState('es_lib') == 'started'
+    return GetResourceState('cortex-lib') == 'started'
 end
 
 local function canUseEsLibDebugPanel()
     return isEsLibStarted()
         and type(exports) == 'table'
-        and exports.es_lib
-        and type(exports.es_lib.showDebugPanel) == 'function'
-        and type(exports.es_lib.updateDebugPanel) == 'function'
-        and type(exports.es_lib.hideDebugPanel) == 'function'
+        and exports['cortex-lib']
+        and type(exports['cortex-lib'].showDebugPanel) == 'function'
+        and type(exports['cortex-lib'].updateDebugPanel) == 'function'
+        and type(exports['cortex-lib'].hideDebugPanel) == 'function'
 end
 
 local math_sqrt = math.sqrt
@@ -572,20 +572,20 @@ end
 local function updateEsLibDebugPanel(force)
     if not Config.Debug or not Config.Debug.Enabled or not Config.Debug.ShowDebugPanel then
         if debugPanelShown and canUseEsLibDebugPanel() then
-            exports.es_lib:hideDebugPanel()
+            exports['cortex-lib']:hideDebugPanel()
         end
         debugPanelShown = false
         return
     end
 
-    if GetResourceState('es_lib') ~= 'started' then
+    if GetResourceState('cortex-lib') ~= 'started' then
         forceDisableAllDebug()
         return
     end
 
     if not PolCam.Active then
         if debugPanelShown and canUseEsLibDebugPanel() then
-            exports.es_lib:hideDebugPanel()
+            exports['cortex-lib']:hideDebugPanel()
         end
         debugPanelShown = false
         return
@@ -612,10 +612,10 @@ local function updateEsLibDebugPanel(force)
     }
 
     if not debugPanelShown then
-        exports.es_lib:showDebugPanel(payload)
+        exports['cortex-lib']:showDebugPanel(payload)
         debugPanelShown = true
     else
-        exports.es_lib:updateDebugPanel(payload)
+        exports['cortex-lib']:updateDebugPanel(payload)
     end
 end
 
@@ -1041,10 +1041,10 @@ end
 local LockingInProgress = false
 
 local function IsEsLibAvailable()
-    return GetResourceState('es_lib') == 'started'
+    return GetResourceState('cortex-lib') == 'started'
         and type(exports) == 'table'
-        and exports.es_lib
-        and exports.es_lib.progress
+        and exports['cortex-lib']
+        and exports['cortex-lib'].progress
 end
 
 local function CompleteLock(entity, entityType)
@@ -1146,7 +1146,7 @@ function StartLocking()
     local lockDuration = (Config.Tracking and Config.Tracking.LockDurationMs) or 2000
 
     CreateThread(function()
-        local completed = exports.es_lib:progress({
+        local completed = exports['cortex-lib']:progress({
             duration = lockDuration,
             label = "ACQUIRING TARGET",
             position = "bottom",

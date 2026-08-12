@@ -4,8 +4,10 @@ lua54 'yes'
 
 name 'Cortex_PolCam'
 description 'Cortex PolCam - Police Helicopter Camera System'
-author 'Cortex PolCam'
-version '1.0.0'
+author 'Cortex'
+version '1.0.1'
+
+dependency 'cortex-lib'
 
 -- Shared configuration
 shared_scripts {

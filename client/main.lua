@@ -49,7 +49,7 @@ local function getNotifyPreference()
     local pref = Config.Lib.Notify
     if type(pref) ~= 'string' then return 'auto' end
     pref = string.lower(pref)
-    if pref == 'auto' or pref == 'es_lib' or pref == 'ox_lib' or pref == 'none' then
+    if pref == 'auto' or pref == 'cortex-lib' or pref == 'ox_lib' or pref == 'none' then
         return pref
     end
     return 'auto'
@@ -62,13 +62,13 @@ end
 local function getNotifyBackend()
     local pref = getNotifyPreference()
 
-    local esReady = (pref == 'es_lib' or pref == 'auto')
-        and isResourceStarted('es_lib')
+    local esReady = (pref == 'cortex-lib' or pref == 'auto')
+        and isResourceStarted('cortex-lib')
         and type(exports) == 'table'
-        and exports.es_lib
-        and exports.es_lib.notify
+        and exports['cortex-lib']
+        and exports['cortex-lib'].notify
 
-    if esReady then return 'es_lib' end
+    if esReady then return 'cortex-lib' end
 
     local oxReady = (pref == 'ox_lib' or pref == 'auto')
         and isResourceStarted('ox_lib')
@@ -84,8 +84,8 @@ end
 function PolCamNotify(notifyType, message)
     local backend = getNotifyBackend()
 
-    if backend == 'es_lib' then
-        exports.es_lib:notify({
+    if backend == 'cortex-lib' then
+        exports['cortex-lib']:notify({
             type = notifyType or 'inform',
             description = message or '',
             position = 'top-right',
@@ -123,9 +123,9 @@ local function checkEsHudAvailable()
     end
 
     if Config.EsHud.AutoDetect then
-        esHudAvailable = isResourceStarted('es_hud')
+        esHudAvailable = isResourceStarted('cortex-hud')
             and type(exports) == 'table'
-            and exports.es_hud
+            and exports['cortex-hud']
     else
         esHudAvailable = true
     end
@@ -142,7 +142,7 @@ local function hideEsHud()
     if esHudHidden then return end
 
     local success = pcall(function()
-        exports.es_hud:hideHud('polcam')
+        exports['cortex-hud']:hideHud('polcam')
     end)
 
     if success then
@@ -158,7 +158,7 @@ local function showEsHud()
     if not esHudHidden then return end
 
     local success = pcall(function()
-        exports.es_hud:showHud('polcam')
+        exports['cortex-hud']:showHud('polcam')
     end)
 
     if success then
@@ -174,7 +174,7 @@ local function setEsHudForceAircraftHud(enabled)
     if not Config.EsHud.ShowAircraftHudForPilot then return false end
 
     local success = pcall(function()
-        exports.es_hud:setForceAircraftHud(enabled)
+        exports['cortex-hud']:setForceAircraftHud(enabled)
     end)
 
     if Config.Debug and Config.Debug.Enabled then
@@ -398,11 +398,11 @@ local function BuildPolCamHighContrastPayload()
 end
 
 local function CanUseEsLibSettings()
-    return GetResourceState('es_lib') == 'started'
+    return GetResourceState('cortex-lib') == 'started'
         and type(exports) == 'table'
-        and exports.es_lib
-        and exports.es_lib.registerSettingsScript
-        and exports.es_lib.getSetting
+        and exports['cortex-lib']
+        and exports['cortex-lib'].registerSettingsScript
+        and exports['cortex-lib'].getSetting
 end
 
 local POLCAM_SETTING_WATCH = {
@@ -470,12 +470,12 @@ local function ApplyPolCamClientSettingsFromEsLib()
     local highContrastCfg = (Config.UI and Config.UI.HighContrast) or {}
     local targetCfg = (Config.UI and Config.UI.TargetLabel) or {}
 
-    local highContrastEnabled = exports.es_lib:getSetting(PolCamSettingsKeys.HighContrastEnabled)
+    local highContrastEnabled = exports['cortex-lib']:getSetting(PolCamSettingsKeys.HighContrastEnabled)
     if type(highContrastEnabled) ~= 'boolean' then
         highContrastEnabled = highContrastCfg.Enabled == true
     end
 
-    local highContrastTheme = exports.es_lib:getSetting(PolCamSettingsKeys.HighContrastTheme)
+    local highContrastTheme = exports['cortex-lib']:getSetting(PolCamSettingsKeys.HighContrastTheme)
     if type(highContrastTheme) ~= 'string' then
         highContrastTheme = highContrastCfg.Theme or 'green'
     end
@@ -484,12 +484,12 @@ local function ApplyPolCamClientSettingsFromEsLib()
         highContrastTheme = highContrastCfg.Theme or 'green'
     end
 
-    local followTheme = exports.es_lib:getSetting(PolCamSettingsKeys.TargetLabelFollowTheme)
+    local followTheme = exports['cortex-lib']:getSetting(PolCamSettingsKeys.TargetLabelFollowTheme)
     if type(followTheme) ~= 'boolean' then
         followTheme = targetCfg.FollowHighContrast ~= false
     end
 
-    local targetLabelColor = exports.es_lib:getSetting(PolCamSettingsKeys.TargetLabelColor)
+    local targetLabelColor = exports['cortex-lib']:getSetting(PolCamSettingsKeys.TargetLabelColor)
     if type(targetLabelColor) ~= 'string' or not IsHexColor(targetLabelColor) then
         targetLabelColor = RgbaToHex(targetCfg.Color)
     end
@@ -521,12 +521,12 @@ end
 local function RegisterPolCamSettingsIntegration()
     if not CanUseEsLibSettings() then return end
 
-    exports.es_lib:registerSettingsScript('polcam', getSettingsDefinition())
+    exports['cortex-lib']:registerSettingsScript('polcam', getSettingsDefinition())
     ApplyPolCamClientSettingsFromEsLib()
     PushPolCamClientSettingsToNui()
 end
 
-AddEventHandler('es_lib:settingChanged', function(key)
+AddEventHandler('cortex-lib:settingChanged', function(key)
     if not POLCAM_SETTING_WATCH[key] then
         return
     end
@@ -662,7 +662,7 @@ local function RegisterKeybinds()
     end, false)
 
     if Config and Config.Debug and Config.Debug.ToolsEnabled then
-        local esStarted = GetResourceState('es_lib') == 'started'
+        local esStarted = GetResourceState('cortex-lib') == 'started'
         if not esStarted then
 
             Config.Debug.Enabled = false
@@ -681,6 +681,16 @@ local function RegisterKeybinds()
 end
 
 local hudEditing = false
+local HUD_POSITION_IDS = {
+    ['top-left'] = true,
+    ['top-right'] = true,
+    ['bottom-left'] = true,
+    ['bottom-right'] = true,
+    ['compass'] = true,
+    ['gimbal'] = true,
+    ['crosshair'] = true,
+    ['pilot-hud'] = true,
+}
 
 function ToggleHUDEdit()
     hudEditing = not hudEditing
@@ -700,27 +710,48 @@ function ToggleHUDEdit()
 end
 
 RegisterNUICallback('saveHUDPosition', function(data, cb)
-    if not data or not data.id then return cb('ok') end
+    if type(data) ~= 'table' or not HUD_POSITION_IDS[data.id] then
+        cb({ ok = false, error = 'invalid_element' })
+        return
+    end
+
+    local x = tonumber(data.x)
+    local y = tonumber(data.y)
+    if not x or not y or x ~= x or y ~= y or x < 0 or x > 100 or y < 0 or y > 100 then
+        cb({ ok = false, error = 'invalid_position' })
+        return
+    end
 
     local key = string.format("polcam_hud_%s", data.id)
-    local posData = json.encode({x = data.x, y = data.y})
+    local posData = json.encode({ x = x, y = y })
 
     SetResourceKvp(key, posData)
-    cb('ok')
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('closeHUDEdit', function(_, cb)
+    if hudEditing then
+        ToggleHUDEdit()
+    else
+        SetNuiFocus(false, false)
+    end
+    cb({ ok = true })
 end)
 
 function GetSavedHUDPositions()
     local positions = {}
-    local elements = {
-        "top-left", "top-right", "bottom-left", "bottom-right",
-        "compass", "gimbal", "crosshair", "pilot-hud", "passenger-hud"
-    }
-
-    for _, id in ipairs(elements) do
+    for id in pairs(HUD_POSITION_IDS) do
         local key = string.format("polcam_hud_%s", id)
         local data = GetResourceKvpString(key)
         if data then
-            positions[id] = json.decode(data)
+            local ok, decoded = pcall(json.decode, data)
+            if ok and type(decoded) == 'table' then
+                local x = tonumber(decoded.x)
+                local y = tonumber(decoded.y)
+                if x and y and x == x and y == y and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
+                    positions[id] = { x = x, y = y }
+                end
+            end
         end
     end
 
@@ -865,6 +896,7 @@ AddEventHandler('polcam:cameraClaimResult', function(allowed, ownerServerId)
 
                 TriggerServerEvent('polcam:trackingRequestState', vehicleNetId)
                 TriggerServerEvent('polcam:requestSyncedMarkers', vehicleNetId)
+                TriggerServerEvent('polcam:requestPOIs')
 
             else
                 ActivatePolCam(true, nil)
@@ -1994,7 +2026,7 @@ CreateThread(function()
 end)
 
 AddEventHandler('onClientResourceStart', function(resourceName)
-    if resourceName ~= 'es_lib' then return end
+    if resourceName ~= 'cortex-lib' then return end
     RegisterPolCamSettingsIntegration()
     ApplyPolCamClientSettingsFromEsLib()
     PushPolCamClientSettingsToNui()
@@ -2002,6 +2034,9 @@ end)
 
 AddEventHandler('onResourceStop', function(resourceName)
     if GetCurrentResourceName() ~= resourceName then return end
+
+    hudEditing = false
+    SetNuiFocus(false, false)
 
     if PolCam.Active then
         DeactivatePolCam()

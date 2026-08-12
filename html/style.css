@@ -100,6 +100,15 @@ body {
     text-shadow: var(--text-shadow);
 }
 
+body.hud-editing .hud-editable {
+    pointer-events: auto !important;
+    cursor: move;
+    outline: 1px dashed rgba(125, 255, 191, 0.9);
+    outline-offset: 4px;
+    user-select: none;
+    touch-action: none;
+}
+
 .hidden {
     display: none !important;
 }

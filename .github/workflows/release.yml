@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RESOURCE_NAME: cortex_polcam
+  RUNTIME_PATHS: |
+    fxmanifest.lua
+    LICENSE
+    README.md
+    config.lua
+    client
+    html
+    server
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n "s/^[[:space:]]*version[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" fxmanifest.lua | head -n1)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::fxmanifest.lua does not contain a valid release version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "asset=${RESOURCE_NAME}-v${version}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce immutable version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.meta.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists. Bump fxmanifest.lua before releasing."
+            exit 1
+          fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists and will not be overwritten."
+            exit 1
+          fi
+
+      - name: Setup Bun
+        if: ${{ hashFiles('**/package.json') != '' }}
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build production NUI
+        if: ${{ hashFiles('**/package.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find . -name package.json -not -path './.git/*' -not -path '*/node_modules/*' | sort)
+          for manifest in "${manifests[@]}"; do
+            dir="$(dirname "$manifest")"
+            (
+              cd "$dir"
+              bun install --frozen-lockfile
+              if bun -e "const p = require('./package.json'); process.exit(p.scripts?.build ? 0 : 1)"; then
+                bun run build
+              fi
+            )
+          done
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "::error::The frozen production build changed committed output. Rebuild and commit it locally."
+            git status --short
+            exit 1
+          fi
+
+      - name: Build and inspect release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="${{ steps.meta.outputs.asset }}"
+          stage="staging/${RESOURCE_NAME}"
+          mkdir -p "$stage" dist extracted
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if [ ! -e "$path" ]; then
+              echo "::error::Required runtime path is missing: $path"
+              exit 1
+            fi
+            cp -a --parents "$path" "$stage"
+          done <<< "$RUNTIME_PATHS"
+
+          forbidden="$(find "$stage" -type f \( -name '*.map' -o -name '.env' -o -name '.env.*' -o -name '*.log' \) -print -quit)"
+          if [ -n "$forbidden" ]; then
+            echo "::error::Forbidden release file: $forbidden"
+            exit 1
+          fi
+
+          (cd staging && zip -q -r "../dist/$asset" "$RESOURCE_NAME")
+          top_levels="$(zipinfo -1 "dist/$asset" | cut -d/ -f1 | sort -u)"
+          if [ "$top_levels" != "$RESOURCE_NAME" ]; then
+            echo "::error::Archive must contain exactly one top-level $RESOURCE_NAME folder"
+            exit 1
+          fi
+          unzip -q "dist/$asset" -d extracted
+          test -f "extracted/$RESOURCE_NAME/fxmanifest.lua"
+          test -f "extracted/$RESOURCE_NAME/html/index.html"
+          (cd dist && sha256sum "$asset" > "$asset.sha256")
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.RESOURCE_NAME }} ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/${{ steps.meta.outputs.asset }}
+            dist/${{ steps.meta.outputs.asset }}.sha256

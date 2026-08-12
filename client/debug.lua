@@ -2,17 +2,17 @@ local tostring = tostring
 
 local function hasEsLibMenu()
     return type(exports) == 'table'
-        and exports.es_lib
-        and type(exports.es_lib.registerMenu) == 'function'
-        and type(exports.es_lib.showMenu) == 'function'
+        and exports['cortex-lib']
+        and type(exports['cortex-lib'].registerMenu) == 'function'
+        and type(exports['cortex-lib'].showMenu) == 'function'
 end
 
 local function hasEsLibDebugPanel()
     return type(exports) == 'table'
-        and exports.es_lib
-        and type(exports.es_lib.showDebugPanel) == 'function'
-        and type(exports.es_lib.updateDebugPanel) == 'function'
-        and type(exports.es_lib.hideDebugPanel) == 'function'
+        and exports['cortex-lib']
+        and type(exports['cortex-lib'].showDebugPanel) == 'function'
+        and type(exports['cortex-lib'].updateDebugPanel) == 'function'
+        and type(exports['cortex-lib'].hideDebugPanel) == 'function'
 end
 
 local function setDebugFlag(key, value)
@@ -38,9 +38,9 @@ local function safeSendPanelUpdate(data)
     if not hasEsLibDebugPanel() then return false end
 
     if data then
-        exports.es_lib:updateDebugPanel(data)
+        exports['cortex-lib']:updateDebugPanel(data)
     else
-        exports.es_lib:updateDebugPanel({})
+        exports['cortex-lib']:updateDebugPanel({})
     end
 
     return true
@@ -48,13 +48,13 @@ end
 
 local function safeShowPanel(data)
     if not hasEsLibDebugPanel() then return false end
-    exports.es_lib:showDebugPanel(data)
+    exports['cortex-lib']:showDebugPanel(data)
     return true
 end
 
 local function safeHidePanel()
     if not hasEsLibDebugPanel() then return false end
-    exports.es_lib:hideDebugPanel()
+    exports['cortex-lib']:hideDebugPanel()
     return true
 end
 
@@ -65,7 +65,7 @@ function OpenPolCamDebugMenu()
         return
     end
 
-    if GetResourceState('es_lib') ~= 'started' then
+    if GetResourceState('cortex-lib') ~= 'started' then
         Config.Debug.Enabled = false
         Config.Debug.ShowDebugPanel = false
         Config.Debug.LogEvents = false
@@ -75,14 +75,14 @@ function OpenPolCamDebugMenu()
 
     if not hasEsLibMenu() then
         if PolCamNotify then
-            PolCamNotify('error', 'es_lib menu not available')
+            PolCamNotify('error', 'cortex-lib menu not available')
         else
-            print('[PolCam] es_lib menu not available')
+            print('[PolCam] cortex-lib menu not available')
         end
         return
     end
 
-    exports.es_lib:registerMenu({
+    exports['cortex-lib']:registerMenu({
         id = MENU_ID,
         title = 'POLCAM DEBUG',
         subtitle = 'Toggle debug flags + panel',
@@ -143,7 +143,7 @@ function OpenPolCamDebugMenu()
         print(('[PolCam Debug] menu submit selected=%s scroll=%s'):format(tostring(selected), tostring(scrollIndex)))
     end)
 
-    exports.es_lib:showMenu(MENU_ID)
+    exports['cortex-lib']:showMenu(MENU_ID)
 end
 
 exports('OpenPolCamDebugMenu', OpenPolCamDebugMenu)

@@ -10,13 +10,16 @@ local GetEntityCoords = GetEntityCoords
 local GetEntityHeading = GetEntityHeading
 local GetEntityType = GetEntityType
 local GetEntityModel = GetEntityModel
+local GetVehicleClass = GetVehicleClass
 local GetVehicleNumberPlateText = GetVehicleNumberPlateText
-local GetPlayerName = GetPlayerName
+local GetPlayerRoutingBucket = GetPlayerRoutingBucket
+local GetEntityRoutingBucket = GetEntityRoutingBucket
+local GetPlayers = GetPlayers
 local TriggerClientEvent = TriggerClientEvent
 local CreateThread = CreateThread
 local Wait = Wait
-local os_time = os.time
-local math_sqrt = math.sqrt
+local math_abs = math.abs
+local math_floor = math.floor
 local pairs = pairs
 local ipairs = ipairs
 local tonumber = tonumber
@@ -36,6 +39,67 @@ local HeliTracking = {}
 local ActiveAirFeeds = {}
 local ActiveRappels = {}
 local SyncedMarkers = {}
+
+local IsAllowedHelicopterEntity
+local IsAllowedSeatForPed
+local GetMaxTrackingDistanceForType
+
+local EventRateState = {}
+local MAX_COORD_ABS = 20000.0
+local MAX_SYNC_DISTANCE = 2000.0
+
+local function IsFiniteNumber(value)
+    return type(value) == 'number'
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
+end
+
+local function ClampNumber(value, minimum, maximum, fallback)
+    local number = tonumber(value)
+    if not IsFiniteNumber(number) then
+        return fallback
+    end
+    if number < minimum then return minimum end
+    if number > maximum then return maximum end
+    return number
+end
+
+local function PositiveInteger(value)
+    local number = tonumber(value)
+    if not IsFiniteNumber(number) or number <= 0 or number ~= math_floor(number) then
+        return nil
+    end
+    return number
+end
+
+local function BoundedString(value, maximumLength, fallback)
+    if type(value) ~= 'string' then
+        return fallback
+    end
+    local text = value:gsub('^%s+', ''):gsub('%s+$', '')
+    if text == '' or #text > maximumLength then
+        return fallback
+    end
+    return text
+end
+
+local function AllowEvent(src, key, minimumIntervalMs)
+    local now = GetGameTimer()
+    local playerState = EventRateState[src]
+    if not playerState then
+        playerState = {}
+        EventRateState[src] = playerState
+    end
+
+    local lastAt = playerState[key] or 0
+    if (now - lastAt) < minimumIntervalMs then
+        return false
+    end
+
+    playerState[key] = now
+    return true
+end
 
 local AIR_FEED_STALE_MS = 1200
 local AIR_FEED_MAINTENANCE_INTERVAL_MS = 250
@@ -71,7 +135,11 @@ local function CloneVec3(value)
     local x = tonumber(value.x or value[1])
     local y = tonumber(value.y or value[2])
     local z = tonumber(value.z or value[3])
-    if not x or not y or not z then
+    if not IsFiniteNumber(x) or not IsFiniteNumber(y) or not IsFiniteNumber(z) then
+        return nil
+    end
+
+    if math_abs(x) > MAX_COORD_ABS or math_abs(y) > MAX_COORD_ABS or math_abs(z) > MAX_COORD_ABS then
         return nil
     end
 
@@ -86,28 +154,126 @@ local function CloneRotation(value)
     local x = tonumber(value.x or value[1])
     local y = tonumber(value.y or value[2])
     local z = tonumber(value.z or value[3])
-    if not x or not y or not z then
+    if not IsFiniteNumber(x) or not IsFiniteNumber(y) or not IsFiniteNumber(z) then
+        return nil
+    end
+
+    if math_abs(x) > 3600.0 or math_abs(y) > 3600.0 or math_abs(z) > 3600.0 then
         return nil
     end
 
     return { x = x + 0.0, y = y + 0.0, z = z + 0.0 }
 end
 
+local function BroadcastToBucket(eventName, routingBucket, ...)
+    if type(routingBucket) ~= 'number' then return end
+
+    for _, playerId in ipairs(GetPlayers()) do
+        local playerSrc = tonumber(playerId)
+        if playerSrc and GetPlayerRoutingBucket(playerSrc) == routingBucket then
+            TriggerClientEvent(eventName, playerSrc, ...)
+        end
+    end
+end
+
+local function SanitizeColor(value)
+    if type(value) ~= 'table' then
+        return nil
+    end
+
+    local r = ClampNumber(value.r or value[1], 0, 255, nil)
+    local g = ClampNumber(value.g or value[2], 0, 255, nil)
+    local b = ClampNumber(value.b or value[3], 0, 255, nil)
+    if not r or not g or not b then
+        return nil
+    end
+
+    return { math_floor(r + 0.5), math_floor(g + 0.5), math_floor(b + 0.5) }
+end
+
+local function ResolveAuthorizedVehicle(src, expectedNetId)
+    local ped = GetPlayerPed(src)
+    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        return nil, nil, nil
+    end
+
+    if not IsAllowedHelicopterEntity(vehicle) or not IsAllowedSeatForPed(ped, vehicle) then
+        return nil, nil, nil
+    end
+
+    local vehicleNetId = NetworkGetNetworkIdFromEntity(vehicle)
+    if not vehicleNetId or vehicleNetId <= 0 then
+        return nil, nil, nil
+    end
+
+    if GetPlayerRoutingBucket(src) ~= GetEntityRoutingBucket(vehicle) then
+        return nil, nil, nil
+    end
+
+    if expectedNetId ~= nil and PositiveInteger(expectedNetId) ~= vehicleNetId then
+        return nil, nil, nil
+    end
+
+    return ped, vehicle, vehicleNetId
+end
+
+local function ValidateTargetForVehicle(vehicle, targetNetId, targetType, maximumDistance)
+    targetNetId = PositiveInteger(targetNetId)
+    if not targetNetId or (targetType ~= 'vehicle' and targetType ~= 'ped') then
+        return nil, nil
+    end
+
+    local targetEntity = NetworkGetEntityFromNetworkId(targetNetId)
+    if not targetEntity or targetEntity == 0 or not DoesEntityExist(targetEntity) then
+        return nil, nil
+    end
+
+    local expectedEntityType = targetType == 'vehicle' and 2 or 1
+    if GetEntityType(targetEntity) ~= expectedEntityType then
+        return nil, nil
+    end
+
+    if GetEntityRoutingBucket(vehicle) ~= GetEntityRoutingBucket(targetEntity) then
+        return nil, nil
+    end
+
+    local vehicleCoords = GetEntityCoords(vehicle)
+    local targetCoords = GetEntityCoords(targetEntity)
+    local dx = vehicleCoords.x - targetCoords.x
+    local dy = vehicleCoords.y - targetCoords.y
+    local dz = vehicleCoords.z - targetCoords.z
+    local maxDistance = ClampNumber(maximumDistance, 1.0, MAX_SYNC_DISTANCE, 1000.0)
+    if (dx * dx + dy * dy + dz * dz) > (maxDistance * maxDistance) then
+        return nil, nil
+    end
+
+    return targetNetId, targetEntity
+end
+
+local function CoordsWithinVehicleRange(vehicle, coords, maximumDistance)
+    local clean = CloneVec3(coords)
+    if not clean then return nil end
+
+    local vehicleCoords = GetEntityCoords(vehicle)
+    local dx = clean.x - vehicleCoords.x
+    local dy = clean.y - vehicleCoords.y
+    local dz = clean.z - vehicleCoords.z
+    local maxDistance = maximumDistance or MAX_SYNC_DISTANCE
+    if (dx * dx + dy * dy + dz * dz) > (maxDistance * maxDistance) then
+        return nil
+    end
+
+    return clean
+end
+
 local function BuildFeedId(vehicleNetId)
     return AIR_FEED_ID_PREFIX .. tostring(vehicleNetId)
 end
 
-local function IsServerVehicleEntity(entity)
-    return entity and entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2
-end
-
-local function IsServerPedEntity(entity)
-    return entity and entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 1
-end
-
 local function ParseFeedId(feedId)
     if type(feedId) == 'number' then
-        return math.floor(feedId)
+        return PositiveInteger(feedId)
     end
 
     if type(feedId) ~= 'string' then
@@ -119,7 +285,7 @@ local function ParseFeedId(feedId)
         return nil
     end
 
-    return tonumber(suffix)
+    return PositiveInteger(suffix)
 end
 
 local function ResolveAirFeedCallsign(src)
@@ -178,8 +344,8 @@ local function BuildAirFeedPreview(feed)
     return {
         coords = CloneVec3(preview.coords),
         rotation = CloneRotation(preview.rotation),
-        fov = tonumber(preview.fov) or 0.0,
-        visionMode = TrimString(preview.visionMode, 'normal'),
+        fov = ClampNumber(preview.fov, 1.0, 130.0, 50.0),
+        visionMode = BoundedString(preview.visionMode, 24, 'normal'),
         status = TrimString(preview.status, 'Online'),
     }
 end
@@ -225,15 +391,15 @@ local function UpsertAirFeed(vehicleNetId, payload)
     feed.feedId = BuildFeedId(vehicleNetId)
     feed.heliNetId = vehicleNetId
     feed.operatorSource = tonumber(payload.operatorSource) or nil
-    feed.label = TrimString(payload.label, feed.label or ('AIR-%s'):format(tostring(vehicleNetId)))
+    feed.label = BoundedString(payload.label, 48, feed.label or ('AIR-%s'):format(tostring(vehicleNetId)))
     feed.callsign = ResolveAirFeedCallsign(feed.operatorSource)
     feed.cameraActive = true
     feed.lastSeenAt = GetGameTimer()
     feed.preview = {
         coords = CloneVec3(payload.camCoords),
         rotation = CloneRotation(payload.camRot),
-        fov = tonumber(payload.fov) or 0.0,
-        visionMode = TrimString(payload.visionMode, 'normal'),
+        fov = ClampNumber(payload.fov, 1.0, 130.0, 50.0),
+        visionMode = BoundedString(payload.visionMode, 24, 'normal'),
         status = 'Online',
     }
     feed.tracking = feed.tracking or {}
@@ -429,53 +595,92 @@ local function MaybeBroadcastSpotlight(vehicleNetId)
         return
     end
     LastSpotlightBroadcastAt[vehicleNetId] = now
-    TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, ActiveSpotlights[vehicleNetId])
+    local spotlight = ActiveSpotlights[vehicleNetId]
+    if spotlight then
+        BroadcastToBucket('polcam:spotlightUpdate', spotlight.routingBucket, vehicleNetId, spotlight)
+    end
 end
 
 RegisterNetEvent('polcam:createPOI')
 AddEventHandler('polcam:createPOI', function(poi)
-    local source = source
-
-    if not poi or not poi.id or not poi.coords then
+    local src = source
+    if type(poi) ~= 'table' or not AllowEvent(src, 'createPOI', 500) then
         return
     end
 
-    poi.serverTime = os.time()
-    poi.creator = source
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
+    if not vehicle or ActiveHeliCameras[vehicleNetId] ~= src then return end
 
-    ServerPOIs[poi.id] = poi
+    local coords = CoordsWithinVehicleRange(vehicle, poi.coords)
+    if not coords then return end
 
-    TriggerClientEvent('polcam:receivePOI', -1, poi)
+    local maxPois = ClampNumber(Config and Config.POI and Config.POI.MaxPOIs, 1, 50, 10)
+    local ownedCount = 0
+    for _, existing in pairs(ServerPOIs) do
+        if type(existing) == 'table' and existing.creator == src then
+            ownedCount = ownedCount + 1
+        end
+    end
+    if ownedCount >= maxPois then return end
+
+    local poiId = BoundedString(poi.id, 64, nil)
+    local expectedPrefix = '^' .. tostring(src) .. '_%d+$'
+    if not poiId or not poiId:match(expectedPrefix) or ServerPOIs[poiId] then return end
+    local routingBucket = GetPlayerRoutingBucket(src)
+    local sanitized = {
+        id = poiId,
+        coords = coords,
+        type = BoundedString(poi.type, 24, 'waypoint'),
+        serverTime = os.time(),
+        creator = src,
+        owner = src,
+        routingBucket = routingBucket,
+    }
+
+    ServerPOIs[poiId] = sanitized
+
+    BroadcastToBucket('polcam:receivePOI', routingBucket, sanitized)
 
     if Config and Config.Debug and Config.Debug.Enabled then
-        print("[PolCam] POI created by player " .. source .. ": " .. poi.id)
+        print("[PolCam] POI created by player " .. src .. ": " .. poiId)
     end
 end)
 
 RegisterNetEvent('polcam:removePOI')
 AddEventHandler('polcam:removePOI', function(poiId)
-    local source = source
+    local src = source
+    poiId = BoundedString(poiId, 64, nil)
+    if not poiId or not AllowEvent(src, 'removePOI', 250) then return end
 
     local poi = ServerPOIs[poiId]
-    if poi and poi.creator == source then
+    if poi and poi.creator == src then
         ServerPOIs[poiId] = nil
 
-        TriggerClientEvent('polcam:poiRemoved', -1, poiId)
+        BroadcastToBucket('polcam:poiRemoved', poi.routingBucket, poiId)
 
         if Config and Config.Debug and Config.Debug.Enabled then
-            print("[PolCam] POI removed by player " .. source .. ": " .. poiId)
+            print("[PolCam] POI removed by player " .. src .. ": " .. poiId)
         end
     end
 end)
 
 RegisterNetEvent('polcam:requestPOIs')
 AddEventHandler('polcam:requestPOIs', function()
-    local source = source
+    local src = source
+    local _, _, vehicleNetId = ResolveAuthorizedVehicle(src)
+    if not vehicleNetId or ActiveHeliCameras[vehicleNetId] ~= src or not AllowEvent(src, 'requestPOIs', 1000) then return end
 
-    TriggerClientEvent('polcam:syncAllPOIs', source, ServerPOIs)
+    local routingBucket = GetPlayerRoutingBucket(src)
+    local bucketPois = {}
+    for id, poi in pairs(ServerPOIs) do
+        if type(poi) == 'table' and poi.routingBucket == routingBucket then
+            bucketPois[id] = poi
+        end
+    end
+    TriggerClientEvent('polcam:syncAllPOIs', src, bucketPois)
 
     if Config and Config.Debug and Config.Debug.Enabled then
-        print("[PolCam] Synced POIs to player " .. source)
+        print("[PolCam] Synced POIs to player " .. src)
     end
 end)
 
@@ -486,7 +691,8 @@ local function PickNextCameraOwner(vehicleNetId, excludingSrc)
     local bestSrc = nil
     local bestAt = 0
     for src, lastAt in pairs(waitlist) do
-        if src ~= excludingSrc and type(lastAt) == 'number' and lastAt > bestAt then
+        local _, _, authorizedNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+        if src ~= excludingSrc and authorizedNetId and type(lastAt) == 'number' and lastAt > bestAt then
             bestSrc = src
             bestAt = lastAt
         end
@@ -504,11 +710,12 @@ local function HandoffCamera(vehicleNetId, oldOwner)
 
         local spotlight = ActiveSpotlights[vehicleNetId]
         if spotlight and spotlight.owner == oldOwner then
+            local routingBucket = spotlight.routingBucket
             ActiveSpotlights[vehicleNetId] = nil
             LastSpotlightBroadcastAt[vehicleNetId] = nil
             LastSpotlightPositionAt[vehicleNetId] = nil
             LastSpotlightRadiusAt[vehicleNetId] = nil
-            TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, nil)
+            BroadcastToBucket('polcam:spotlightUpdate', routingBucket, vehicleNetId, nil)
         end
 
         return
@@ -542,7 +749,8 @@ local function HandoffCamera(vehicleNetId, oldOwner)
     local spotlight = ActiveSpotlights[vehicleNetId]
     if spotlight and spotlight.active then
         spotlight.owner = nextOwner
-        TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, spotlight)
+        spotlight.routingBucket = GetPlayerRoutingBucket(nextOwner)
+        BroadcastToBucket('polcam:spotlightUpdate', spotlight.routingBucket, vehicleNetId, spotlight)
 
         TriggerClientEvent('polcam:spotlightEnsureOn', nextOwner, spotlight.radius, spotlight.color)
     end
@@ -551,10 +759,12 @@ end
 RegisterNetEvent('polcam:cameraClaim')
 AddEventHandler('polcam:cameraClaim', function(vehicleNetId)
     local src = source
-    if not vehicleNetId then
+    local _, _, authorizedNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+    if not authorizedNetId or not AllowEvent(src, 'cameraClaim', 250) then
         TriggerClientEvent('polcam:cameraClaimResult', src, false)
         return
     end
+    vehicleNetId = authorizedNetId
 
     local owner = ActiveHeliCameras[vehicleNetId]
     if owner == nil or owner == src then
@@ -573,7 +783,8 @@ end)
 RegisterNetEvent('polcam:cameraRelease')
 AddEventHandler('polcam:cameraRelease', function(vehicleNetId)
     local src = source
-    if not vehicleNetId then return end
+    vehicleNetId = PositiveInteger(vehicleNetId)
+    if not vehicleNetId or not AllowEvent(src, 'cameraRelease', 150) then return end
 
     if CameraWaitlists[vehicleNetId] then
         CameraWaitlists[vehicleNetId][src] = nil
@@ -586,6 +797,7 @@ AddEventHandler('polcam:cameraRelease', function(vehicleNetId)
 end)
 
 local function HandlePlayerDropped(src)
+    EventRateState[src] = nil
     LastTrackingStartAt[src] = nil
     LastTrackingStopAt[src] = nil
     LastTrackingStateAt[src] = nil
@@ -611,11 +823,12 @@ local function HandlePlayerDropped(src)
 
     for vehicleNetId, spotlight in pairs(ActiveSpotlights) do
         if spotlight and spotlight.owner == src then
+            local routingBucket = spotlight.routingBucket
             ActiveSpotlights[vehicleNetId] = nil
             LastSpotlightBroadcastAt[vehicleNetId] = nil
             LastSpotlightPositionAt[vehicleNetId] = nil
             LastSpotlightRadiusAt[vehicleNetId] = nil
-            TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, nil)
+            BroadcastToBucket('polcam:spotlightUpdate', routingBucket, vehicleNetId, nil)
         end
     end
 
@@ -671,13 +884,19 @@ local function HandlePlayerDropped(src)
     end
 
     if ActiveRappels[src] then
+        local activeRappel = ActiveRappels[src]
         ActiveRappels[src] = nil
+        BroadcastToBucket('polcam:syncRappel', activeRappel.routingBucket, {
+            source = src,
+            action = 'end',
+            duration = (GetGameTimer() - (activeRappel.startTime or 0)) / 1000,
+        })
     end
 
     for id, marker in pairs(SyncedMarkers or {}) do
         if type(marker) == 'table' and marker.creator == src then
             SyncedMarkers[id] = nil
-            TriggerClientEvent('polcam:syncedMarkerRemoved', -1, id)
+            BroadcastToBucket('polcam:syncedMarkerRemoved', marker.routingBucket, id)
         end
     end
 
@@ -686,20 +905,52 @@ end
 RegisterNetEvent('polcam:cameraStateSync')
 AddEventHandler('polcam:cameraStateSync', function(vehicleNetId, state)
     local src = source
-    if not vehicleNetId then return end
-    if type(state) ~= 'table' then return end
+    local _, vehicle, authorizedNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+    if not vehicle or not authorizedNetId or type(state) ~= 'table' then return end
+    vehicleNetId = authorizedNetId
 
     if ActiveHeliCameras[vehicleNetId] ~= src then return end
 
+    local syncInterval = ClampNumber(Config and Config.SharedCamera and Config.SharedCamera.SyncIntervalMs, 100, 5000, 200)
+    if not AllowEvent(src, 'cameraStateSync', syncInterval) then return end
+
+    local heading = ClampNumber(state.heading, -3600.0, 3600.0, nil)
+    local pitch = ClampNumber(state.pitch, -90.0, 90.0, nil)
+    local zoom = ClampNumber(state.zoom, 0.1, 100.0, nil)
+    local targetZoom = ClampNumber(state.targetZoom, 0.1, 100.0, zoom)
+    local visionMode = BoundedString(state.visionMode, 24, 'normal')
+    if not heading or not pitch or not zoom then return end
+
+    local groundLockPoint = nil
+    if state.groundLockPoint ~= nil then
+        groundLockPoint = CoordsWithinVehicleRange(vehicle, state.groundLockPoint, MAX_SYNC_DISTANCE)
+        if not groundLockPoint then return end
+    end
+
+    local lockedTargetNetId = state.lockedTargetNetId ~= nil and PositiveInteger(state.lockedTargetNetId) or nil
+    local lockedTargetType = state.lockedTargetType
+    if state.lockedTargetNetId ~= nil then
+        local validatedTargetNetId = ValidateTargetForVehicle(
+            vehicle,
+            lockedTargetNetId,
+            lockedTargetType,
+            GetMaxTrackingDistanceForType(lockedTargetType)
+        )
+        if not validatedTargetNetId then return end
+        lockedTargetNetId = validatedTargetNetId
+    else
+        lockedTargetType = nil
+    end
+
     SharedCameraState[vehicleNetId] = {
-        heading = state.heading,
-        pitch = state.pitch,
-        zoom = state.zoom,
-        targetZoom = state.targetZoom,
-        visionMode = state.visionMode,
-        lockedTargetNetId = state.lockedTargetNetId,
-        lockedTargetType = state.lockedTargetType,
-        groundLockPoint = state.groundLockPoint,
+        heading = heading,
+        pitch = pitch,
+        zoom = zoom,
+        targetZoom = targetZoom,
+        visionMode = visionMode,
+        lockedTargetNetId = lockedTargetNetId,
+        lockedTargetType = lockedTargetType,
+        groundLockPoint = groundLockPoint,
         lastUpdate = GetGameTimer(),
         lastOwner = src
     }
@@ -712,7 +963,9 @@ end)
 RegisterNetEvent('polcam:requestCameraState')
 AddEventHandler('polcam:requestCameraState', function(vehicleNetId)
     local src = source
-    if not vehicleNetId then return end
+    local _, _, authorizedNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+    if not authorizedNetId or not AllowEvent(src, 'requestCameraState', 500) then return end
+    vehicleNetId = authorizedNetId
 
     local state = SharedCameraState[vehicleNetId]
     if state then
@@ -745,12 +998,12 @@ end
 RegisterNetEvent('polcam:spotlightSync')
 AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCoords, initialHeliCoords, color)
     local src = source
-    local ped = GetPlayerPed(src)
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    if type(active) ~= 'boolean' or not AllowEvent(src, 'spotlightSync', 150) then return end
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then return end
 
     if active then
+        if ActiveHeliCameras[vehicleNetId] ~= src then return end
 
         local existingSpotlight = ActiveSpotlights[vehicleNetId]
 
@@ -765,12 +1018,13 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
 
         ActiveSpotlights[vehicleNetId] = {
             active = true,
-            radius = radius or 5.0,
-            color = color or (existingSpotlight and existingSpotlight.color) or nil,
+            radius = ClampNumber(radius, 1.0, 25.0, 5.0),
+            color = SanitizeColor(color) or (existingSpotlight and existingSpotlight.color) or { 255, 255, 255 },
             owner = src,
             vehicleNetId = vehicleNetId,
-            heliCoords = initialHeliCoords or (existingSpotlight and existingSpotlight.heliCoords) or nil,
-            groundCoords = initialGroundCoords or (existingSpotlight and existingSpotlight.groundCoords) or nil,
+            routingBucket = GetPlayerRoutingBucket(src),
+            heliCoords = CoordsWithinVehicleRange(vehicle, initialHeliCoords, 25.0) or (existingSpotlight and existingSpotlight.heliCoords) or nil,
+            groundCoords = CoordsWithinVehicleRange(vehicle, initialGroundCoords, MAX_SYNC_DISTANCE) or (existingSpotlight and existingSpotlight.groundCoords) or nil,
             targetNetId = targetNetId,
             trackingTarget = trackingTarget
         }
@@ -786,15 +1040,15 @@ AddEventHandler('polcam:spotlightSync', function(active, radius, initialGroundCo
         end
     end
 
-    TriggerClientEvent('polcam:spotlightUpdate', -1, vehicleNetId, ActiveSpotlights[vehicleNetId])
+    local activeSpotlight = ActiveSpotlights[vehicleNetId]
+    local routingBucket = activeSpotlight and activeSpotlight.routingBucket or GetPlayerRoutingBucket(src)
+    BroadcastToBucket('polcam:spotlightUpdate', routingBucket, vehicleNetId, activeSpotlight)
 end)
 
 RegisterNetEvent('polcam:spotlightRadius')
 AddEventHandler('polcam:spotlightRadius', function(radius)
     local src = source
-    local ped = GetPlayerPed(src)
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local _, _, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then return end
 
     local spotlight = ActiveSpotlights[vehicleNetId]
@@ -807,7 +1061,7 @@ AddEventHandler('polcam:spotlightRadius', function(radius)
         end
         LastSpotlightRadiusAt[vehicleNetId] = now
 
-        spotlight.radius = radius
+        spotlight.radius = ClampNumber(radius, 1.0, 25.0, spotlight.radius or 5.0)
         MaybeBroadcastSpotlight(vehicleNetId)
     end
 end)
@@ -815,14 +1069,14 @@ end)
 RegisterNetEvent('polcam:spotlightColor')
 AddEventHandler('polcam:spotlightColor', function(color)
     local src = source
-    local ped = GetPlayerPed(src)
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local _, _, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then return end
 
     local spotlight = ActiveSpotlights[vehicleNetId]
     if spotlight and spotlight.owner == src then
-        spotlight.color = color
+        local cleanColor = SanitizeColor(color)
+        if not cleanColor then return end
+        spotlight.color = cleanColor
         MaybeBroadcastSpotlight(vehicleNetId)
     end
 end)
@@ -830,9 +1084,7 @@ end)
 RegisterNetEvent('polcam:spotlightPosition')
 AddEventHandler('polcam:spotlightPosition', function(groundCoords, heliCoords)
     local src = source
-    local ped = GetPlayerPed(src)
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then return end
 
     local spotlight = ActiveSpotlights[vehicleNetId]
@@ -843,6 +1095,10 @@ AddEventHandler('polcam:spotlightPosition', function(groundCoords, heliCoords)
         if (now - lastPos) < posInterval then
             return
         end
+
+        groundCoords = CoordsWithinVehicleRange(vehicle, groundCoords, MAX_SYNC_DISTANCE)
+        heliCoords = CoordsWithinVehicleRange(vehicle, heliCoords, 25.0)
+        if not groundCoords or not heliCoords then return end
 
         local prevGround = spotlight.groundCoords
         local prevHeli = spotlight.heliCoords
@@ -963,7 +1219,7 @@ ClearHeliTracking = function(vehicleNetId)
     end
 end
 
-local function IsAllowedHelicopterEntity(vehicle)
+IsAllowedHelicopterEntity = function(vehicle)
     if not vehicle or vehicle == 0 then return false end
 
     local allowed = Config and Config.AllowedHelicopters
@@ -979,7 +1235,7 @@ local function IsAllowedHelicopterEntity(vehicle)
     return false
 end
 
-local function IsAllowedSeatForPed(ped, vehicle)
+IsAllowedSeatForPed = function(ped, vehicle)
     local allowedSeats = (Config and Config.AllowedSeats)
     if type(allowedSeats) ~= 'table' then return true end
 
@@ -995,16 +1251,16 @@ end
 RegisterNetEvent('polcam:feedHeartbeat')
 AddEventHandler('polcam:feedHeartbeat', function(payload)
     local src = source
-    if type(payload) ~= 'table' then
+    if type(payload) ~= 'table' or not AllowEvent(src, 'feedHeartbeat', 100) then
         return
     end
 
-    local vehicleNetId = tonumber(payload.heliNetId)
-    if not vehicleNetId or vehicleNetId <= 0 then
+    local vehicleNetId = PositiveInteger(payload.heliNetId)
+    if not vehicleNetId then
         return
     end
 
-    local operatorSource = tonumber(payload.operatorSource)
+    local operatorSource = PositiveInteger(payload.operatorSource)
     if operatorSource ~= src then
         return
     end
@@ -1028,12 +1284,14 @@ AddEventHandler('polcam:feedHeartbeat', function(payload)
         return
     end
 
-    local coords = CloneVec3(payload.camCoords)
+    local coords = CoordsWithinVehicleRange(vehicle, payload.camCoords, MAX_SYNC_DISTANCE)
     local rotation = CloneRotation(payload.camRot)
     if not coords or not rotation then
         return
     end
 
+    payload.camCoords = coords
+    payload.camRot = rotation
     local feed = UpsertAirFeed(vehicleNetId, payload)
     feed.pilotSource = ResolvePilotSource(vehicle)
     feed.callsign = ResolveAirFeedCallsign(src)
@@ -1069,7 +1327,7 @@ local function MaintainAirFeeds()
     end
 end
 
-local function GetMaxTrackingDistanceForType(targetType)
+GetMaxTrackingDistanceForType = function(targetType)
     local tracking = Config and Config.Tracking
     if type(tracking) ~= 'table' then return 1000.0 end
 
@@ -1085,57 +1343,18 @@ local function GetMaxTrackingDistanceForType(targetType)
 end
 
 local function ValidateTrackingTargetRequest(src, targetNetId, targetType)
-    if type(targetNetId) ~= 'number' or targetNetId <= 0 then
-        return nil
-    end
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
+    if not vehicleNetId or ActiveHeliCameras[vehicleNetId] ~= src then return nil end
 
-    if targetType ~= 'vehicle' and targetType ~= 'ped' then
-        return nil
-    end
+    local validatedTargetNetId = ValidateTargetForVehicle(
+        vehicle,
+        targetNetId,
+        targetType,
+        GetMaxTrackingDistanceForType(targetType)
+    )
+    if not validatedTargetNetId then return nil end
 
-    local ped = GetPlayerPed(src)
-    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
-    if not vehicle or vehicle == 0 then
-        return nil
-    end
-
-    if not IsAllowedHelicopterEntity(vehicle) then
-        return nil
-    end
-
-    if not IsAllowedSeatForPed(ped, vehicle) then
-        return nil
-    end
-
-    local vehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
-    if not vehicleNetId then
-        return nil
-    end
-
-    local targetEntity = NetworkGetEntityFromNetworkId(targetNetId)
-    if not targetEntity or targetEntity == 0 or not DoesEntityExist(targetEntity) then
-        return nil
-    end
-
-    if targetType == 'vehicle' and not IsServerVehicleEntity(targetEntity) then
-        return nil
-    end
-
-    if targetType == 'ped' and not IsServerPedEntity(targetEntity) then
-        return nil
-    end
-
-    local heliCoords = GetEntityCoords(vehicle)
-    local targetCoords = GetEntityCoords(targetEntity)
-    local dx = heliCoords.x - targetCoords.x
-    local dy = heliCoords.y - targetCoords.y
-    local dz = heliCoords.z - targetCoords.z
-    local maxDist = GetMaxTrackingDistanceForType(targetType)
-    if (dx * dx + dy * dy + dz * dz) > (maxDist * maxDist) then
-        return nil
-    end
-
-    return vehicleNetId
+    return vehicleNetId, validatedTargetNetId
 end
 
 local function SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
@@ -1168,12 +1387,12 @@ AddEventHandler('polcam:trackingRequestStart', function(targetNetId, targetType)
         return
     end
 
-    local vehicleNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
+    local vehicleNetId, validatedTargetNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
     if not vehicleNetId then
         return
     end
 
-    SetHeliTracking(vehicleNetId, src, targetNetId, targetType)
+    SetHeliTracking(vehicleNetId, src, validatedTargetNetId, targetType)
 end)
 
 RegisterNetEvent('polcam:trackingRequestStop')
@@ -1184,20 +1403,14 @@ AddEventHandler('polcam:trackingRequestStop', function()
         return
     end
 
-    local ped = GetPlayerPed(src)
-    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
-    if not vehicle or vehicle == 0 then
-        return
-    end
-
-    local vehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local _, _, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then
         return
     end
 
     local tracking = HeliTracking[vehicleNetId]
     if tracking and tracking.ownerSrc and tracking.ownerSrc ~= src then
-
+        return
     end
 
     ClearHeliTracking(vehicleNetId)
@@ -1224,12 +1437,12 @@ AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
             return
         end
 
-        local validatedVehicleNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
+        local validatedVehicleNetId, validatedTargetNetId = ValidateTrackingTargetRequest(src, targetNetId, targetType)
         if not validatedVehicleNetId then
             return
         end
 
-        SetHeliTracking(validatedVehicleNetId, src, targetNetId, targetType)
+        SetHeliTracking(validatedVehicleNetId, src, validatedTargetNetId, targetType)
     else
         if not RateLimitTracking(src, 'stop', now) then
             return
@@ -1239,6 +1452,10 @@ AddEventHandler('polcam:trackingSync', function(active, targetNetId, targetType)
             return
         end
 
+        local tracking = HeliTracking[vehicleNetId]
+        if tracking and tracking.ownerSrc and tracking.ownerSrc ~= src then
+            return
+        end
         ClearHeliTracking(vehicleNetId)
     end
 end)
@@ -1251,18 +1468,9 @@ AddEventHandler('polcam:trackingRequestState', function(vehicleNetId)
         return
     end
 
-    if type(vehicleNetId) ~= 'number' then return end
-
-    local ped = GetPlayerPed(src)
-    local vehicle = ped and GetVehiclePedIsIn(ped, false) or 0
-    if not vehicle or vehicle == 0 then
-        return
-    end
-
-    local myVehicleNetId = DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
-    if myVehicleNetId ~= vehicleNetId then
-        return
-    end
+    local _, _, myVehicleNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+    if not myVehicleNetId then return end
+    vehicleNetId = myVehicleNetId
 
     local state = HeliTracking[vehicleNetId] or { active = false, seq = 0 }
     state.vehicleNetId = vehicleNetId
@@ -1272,9 +1480,7 @@ end)
 RegisterNetEvent('polcam:trackingPosition')
 AddEventHandler('polcam:trackingPosition', function(targetCoords, heliCoords, targetNetId)
     local src = source
-    local ped = GetPlayerPed(src)
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    local vehicleNetId = vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetNetworkIdFromEntity(vehicle) or nil
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
     if not vehicleNetId then return end
 
     local spotlight = ActiveSpotlights[vehicleNetId]
@@ -1286,10 +1492,18 @@ AddEventHandler('polcam:trackingPosition', function(targetCoords, heliCoords, ta
             return
         end
 
+        local cleanGround = CoordsWithinVehicleRange(vehicle, targetCoords, MAX_SYNC_DISTANCE)
+        local cleanHeli = CoordsWithinVehicleRange(vehicle, heliCoords, 25.0)
+        local tracking = HeliTracking[vehicleNetId]
+        if not tracking or tracking.active ~= true or tracking.ownerSrc ~= src then return end
+        local cleanTargetNetId = PositiveInteger(targetNetId)
+        if not cleanGround or not cleanHeli or cleanTargetNetId ~= tracking.targetNetId then return end
+        if not ValidateTargetForVehicle(vehicle, cleanTargetNetId, tracking.targetType, GetMaxTrackingDistanceForType(tracking.targetType)) then return end
+
         LastSpotlightPositionAt[vehicleNetId] = now
-        spotlight.groundCoords = targetCoords
-        spotlight.heliCoords = heliCoords
-        spotlight.targetNetId = targetNetId
+        spotlight.groundCoords = cleanGround
+        spotlight.heliCoords = cleanHeli
+        spotlight.targetNetId = cleanTargetNetId
         spotlight.trackingTarget = true
         MaybeBroadcastSpotlight(vehicleNetId)
     end
@@ -1297,97 +1511,134 @@ end)
 
 RegisterNetEvent('polcam:rappelStart')
 AddEventHandler('polcam:rappelStart', function(data)
-    local source = source
+    local src = source
+    if type(data) ~= 'table' or not AllowEvent(src, 'rappelStart', 1000) then return end
+    if ActiveRappels[src] then return end
 
-    ActiveRappels[source] = {
+    local ped, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src, data.vehicle)
+    if not ped or not vehicle or GetVehicleClass(vehicle) ~= 15 then return end
+
+    local allowedRappelSeat = false
+    local rappelSeats = Config and Config.Rappel and Config.Rappel.AllowedSeats or { 1, 2 }
+    for _, seat in ipairs(rappelSeats) do
+        if GetPedInVehicleSeat(vehicle, seat) == ped then
+            allowedRappelSeat = true
+            break
+        end
+    end
+    if not allowedRappelSeat then return end
+
+    local altitude = ClampNumber(data.altitude, 0.0, 1000.0, nil)
+    local minAltitude = ClampNumber(Config and Config.Rappel and Config.Rappel.MinAltitude, 0.0, 1000.0, 15.0)
+    local maxAltitude = ClampNumber(Config and Config.Rappel and Config.Rappel.MaxAltitude, minAltitude, 1000.0, 150.0)
+    if not altitude or altitude < minAltitude or altitude > maxAltitude then return end
+
+    local model = GetEntityModel(vehicle)
+    if tonumber(data.model) ~= model then return end
+
+    ActiveRappels[src] = {
         startTime = GetGameTimer(),
-        vehicleNetId = data.vehicle,
-        altitude = data.altitude,
-        model = data.model
+        vehicleNetId = vehicleNetId,
+        altitude = altitude,
+        model = model,
+        routingBucket = GetPlayerRoutingBucket(src),
     }
 
-    TriggerClientEvent('polcam:syncRappel', -1, {
-        source = source,
-        vehicle = data.vehicle,
-        altitude = data.altitude,
-        model = data.model,
+    BroadcastToBucket('polcam:syncRappel', ActiveRappels[src].routingBucket, {
+        source = src,
+        vehicle = vehicleNetId,
+        altitude = altitude,
+        model = model,
         action = 'start'
     })
 
     if Config and Config.Debug and Config.Debug.Enabled then
-        print(string.format("[PolCam] Player %d started rappeling from %.0f ft", source, data.altitude or 0))
+        print(string.format("[PolCam] Player %d started rappeling from %.0f ft", src, altitude))
     end
 end)
 
 RegisterNetEvent('polcam:rappelEnd')
 AddEventHandler('polcam:rappelEnd', function(data)
-    local source = source
+    local src = source
+    if data ~= nil and type(data) ~= 'table' then return end
+    if not AllowEvent(src, 'rappelEnd', 500) then return end
 
-    if ActiveRappels[source] then
-        local duration = (GetGameTimer() - (ActiveRappels[source].startTime or 0)) / 1000
-        ActiveRappels[source] = nil
+    if ActiveRappels[src] then
+        local activeRappel = ActiveRappels[src]
+        local duration = (GetGameTimer() - (activeRappel.startTime or 0)) / 1000
+        ActiveRappels[src] = nil
 
-        TriggerClientEvent('polcam:syncRappel', -1, {
-            source = source,
+        BroadcastToBucket('polcam:syncRappel', activeRappel.routingBucket, {
+            source = src,
             action = 'end',
             duration = duration
         })
 
         if Config and Config.Debug and Config.Debug.Enabled then
-            print(string.format("[PolCam] Player %d finished rappeling (%.1fs)", source, duration))
+            print(string.format("[PolCam] Player %d finished rappeling (%.1fs)", src, duration))
         end
     end
 end)
 
 RegisterNetEvent('polcam:createSyncedMarker')
 AddEventHandler('polcam:createSyncedMarker', function(markerData)
-    local source = source
-    local ped = GetPlayerPed(source)
-    local vehicle = GetVehiclePedIsIn(ped, false)
+    local src = source
+    if type(markerData) ~= 'table' or not AllowEvent(src, 'createMarker', 300) then return end
+    local _, vehicle, vehicleNetId = ResolveAuthorizedVehicle(src)
+    if not vehicleNetId or ActiveHeliCameras[vehicleNetId] ~= src then return end
 
-    if vehicle == 0 then return end
-    if not DoesEntityExist(vehicle) then return end
-
-    local vehicleNetId = NetworkGetNetworkIdFromEntity(vehicle)
-    if not vehicleNetId then return end
+    local coords = CoordsWithinVehicleRange(vehicle, markerData.coords, MAX_SYNC_DISTANCE)
+    if not coords then return end
 
     SyncedMarkers = SyncedMarkers or {}
 
-    local markerId = markerData.id or tostring(source) .. '_' .. tostring(GetGameTimer())
+    local ownedCount = 0
+    for _, marker in pairs(SyncedMarkers) do
+        if type(marker) == 'table' and marker.creator == src then ownedCount = ownedCount + 1 end
+    end
+    if ownedCount >= 25 then return end
+
+    local markerId = ('marker:%d:%d'):format(src, GetGameTimer())
 
     SyncedMarkers[markerId] = {
         id = markerId,
-        coords = markerData.coords,
-        type = markerData.type or 'waypoint',
-        color = markerData.color,
-        creator = source,
+        coords = coords,
+        type = BoundedString(markerData.type, 24, 'waypoint'),
+        color = SanitizeColor(markerData.color),
+        creator = src,
         vehicleNetId = vehicleNetId,
-        createdAt = GetGameTimer()
+        createdAt = GetGameTimer(),
+        routingBucket = GetPlayerRoutingBucket(src),
     }
 
-    TriggerClientEvent('polcam:receiveSyncedMarker', -1, SyncedMarkers[markerId])
+    BroadcastToBucket('polcam:receiveSyncedMarker', SyncedMarkers[markerId].routingBucket, SyncedMarkers[markerId])
 
     if Config and Config.Debug and Config.Debug.Enabled then
-        print(string.format("[PolCam] Synced marker created by player %d", source))
+        print(string.format("[PolCam] Synced marker created by player %d", src))
     end
 end)
 
 RegisterNetEvent('polcam:removeSyncedMarker')
 AddEventHandler('polcam:removeSyncedMarker', function(markerId)
-    local source = source
+    local src = source
+    markerId = BoundedString(markerId, 64, nil)
+    if not markerId or not AllowEvent(src, 'removeMarker', 200) then return end
 
     SyncedMarkers = SyncedMarkers or {}
 
     local marker = SyncedMarkers[markerId]
-    if marker and marker.creator == source then
+    if marker and marker.creator == src then
         SyncedMarkers[markerId] = nil
-        TriggerClientEvent('polcam:syncedMarkerRemoved', -1, markerId)
+        BroadcastToBucket('polcam:syncedMarkerRemoved', marker.routingBucket, markerId)
     end
 end)
 
 RegisterNetEvent('polcam:requestSyncedMarkers')
 AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
-    local source = source
+    local src = source
+    local _, _, authorizedNetId = ResolveAuthorizedVehicle(src, vehicleNetId)
+    if not authorizedNetId or ActiveHeliCameras[authorizedNetId] ~= src or not AllowEvent(src, 'requestMarkers', 500) then return end
+    vehicleNetId = authorizedNetId
 
     SyncedMarkers = SyncedMarkers or {}
 
@@ -1398,7 +1649,7 @@ AddEventHandler('polcam:requestSyncedMarkers', function(vehicleNetId)
         end
     end
 
-    TriggerClientEvent('polcam:syncAllMarkers', source, vehicleMarkers)
+    TriggerClientEvent('polcam:syncAllMarkers', src, vehicleMarkers)
 end)
 
 CreateThread(function()
@@ -1420,7 +1671,7 @@ CreateThread(function()
                 local age = currentTime - (poi.serverTime or 0)
                 if age > expiryTime then
                     ServerPOIs[id] = nil
-                    TriggerClientEvent('polcam:poiRemoved', -1, id)
+                    BroadcastToBucket('polcam:poiRemoved', poi.routingBucket, id)
 
                     if Config and Config.Debug and Config.Debug.Enabled then
                         print("[PolCam] POI expired: " .. id)
