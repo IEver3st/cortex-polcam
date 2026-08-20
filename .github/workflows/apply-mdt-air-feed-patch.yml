@@ -1,0 +1,56 @@
+name: Apply MDT air-feed patch
+
+on:
+  push:
+    branches:
+      - feat/mdt-polcam-remote-feed
+    paths:
+      - .github/workflows/apply-mdt-air-feed-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the feature branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_REF_NAME}"
+          git checkout -B "${GITHUB_REF_NAME}" FETCH_HEAD
+
+      - name: Apply deterministic MDT export patch
+        run: python3 scripts/apply_mdt_air_feed_patch.py
+
+      - name: Validate Lua syntax
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y lua5.4
+          LUA_COMPILER="$(command -v luac5.4 || command -v luac)"
+          "${LUA_COMPILER}" -p \
+            config.lua \
+            server/mdt_integration.lua \
+            server/main.lua
+
+      - name: Run contract tests
+        run: node --test tests/*.test.js
+
+      - name: Verify clean patch formatting
+        run: git diff --check
+
+      - name: Commit the completed patch
+        run: |
+          set -euo pipefail
+          rm -f scripts/apply_mdt_air_feed_patch.py
+          rm -f .github/workflows/apply-mdt-air-feed-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: gate remote PolCam feeds by MDT duty"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
