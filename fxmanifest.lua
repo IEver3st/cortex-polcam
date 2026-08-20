@@ -33,6 +33,7 @@ client_scripts {
 
 -- Server scripts
 server_scripts {
+    'server/mdt_integration.lua',
     'server/main.lua'
 }
 
@@ -62,5 +63,7 @@ exports {
 server_exports {
     'GetActiveAirFeeds',
     'GetAirFeedById',
-    'GetTrackedDatalinkTargets'
+    'GetTrackedDatalinkTargets',
+    'IsMdtAirFeedAuthorized',
+    'GetMdtDutyState'
 }
