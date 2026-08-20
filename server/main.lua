@@ -147,7 +147,7 @@ local function CloneVec3(value)
 end
 
 local function CloneRotation(value)
-    if type(value) ~= 'table' then
+    if type(value) ~= 'table' and type(value) ~= 'vector3' then
         return nil
     end
 
