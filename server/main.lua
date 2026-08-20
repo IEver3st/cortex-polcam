@@ -452,10 +452,22 @@ local function RemoveAirFeed(vehicleNetId)
     ActiveAirFeeds[vehicleNetId] = nil
 end
 
+local function IsAirFeedExportAuthorized(feed)
+    local integration = rawget(_G, 'CortexPolCamMdtIntegration')
+    if type(integration) ~= 'table' or type(integration.isFeedAuthorized) ~= 'function' then
+        return true
+    end
+
+    local ok, authorized = pcall(integration.isFeedAuthorized, feed)
+    return ok and authorized == true
+end
+
 local function GetActiveAirFeeds()
     local feeds = {}
     for _, feed in pairs(ActiveAirFeeds) do
-        if type(feed) == 'table' and feed.cameraActive == true then
+        if type(feed) == 'table'
+            and feed.cameraActive == true
+            and IsAirFeedExportAuthorized(feed) then
             feeds[#feeds + 1] = BuildAirFeedPublic(feed)
         end
     end
@@ -478,14 +490,19 @@ local function GetAirFeedById(feedId)
         return nil
     end
 
-    return BuildAirFeedPublic(ActiveAirFeeds[vehicleNetId])
+    local feed = ActiveAirFeeds[vehicleNetId]
+    if not IsAirFeedExportAuthorized(feed) then
+        return nil
+    end
+
+    return BuildAirFeedPublic(feed)
 end
 
 local function GetTrackedDatalinkTargets()
     local targets = {}
 
     for _, feed in pairs(ActiveAirFeeds) do
-        local publicFeed = BuildAirFeedPublic(feed)
+        local publicFeed = IsAirFeedExportAuthorized(feed) and BuildAirFeedPublic(feed) or nil
         local tracking = publicFeed and publicFeed.tracking
         if publicFeed
             and tracking

@@ -4,6 +4,17 @@ Config.AllowedSeats = { -1, 0, 1, 2 }
 Config.InstantLock = false
 Config.Lib = { Notify = 'auto' }
 
+-- Optional Cortex MDT link. Local PolCam operation remains available when the
+-- MDT is absent; only exported remote feeds are duty-gated while it is online.
+Config.MDTIntegration = {
+    Enabled = true,
+    Resource = 'cortex_mdtsv',
+    RequireOperatorOnDuty = true,
+    RequirePilotOnDuty = true,
+    FailClosedWhenUnavailable = false,
+    DutyCacheMs = 250,
+}
+
 Config.Keybinds = {
     ToggleCamera  = "E",
     ToggleUI      = "H",
