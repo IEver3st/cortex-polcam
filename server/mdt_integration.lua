@@ -183,10 +183,18 @@ local function authorizeFeed(feed)
         end
     end
 
-    if config.RequirePilotOnDuty ~= false
-        and pilotSource and pilotSource > 0
-        and pilotSource ~= operatorSource then
-        result.pilot = getDutyState(pilotSource, config)
+    if config.RequirePilotOnDuty ~= false then
+        if not pilotSource or pilotSource <= 0 then
+            result.code = 'pilot_unavailable'
+            return false, result
+        end
+
+        if pilotSource == operatorSource and result.operator then
+            result.pilot = result.operator
+        else
+            result.pilot = getDutyState(pilotSource, config)
+        end
+
         if result.pilot.ok ~= true or result.pilot.onDuty ~= true then
             result.code = 'pilot_off_duty'
             return false, result
