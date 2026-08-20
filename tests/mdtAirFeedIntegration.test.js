@@ -21,6 +21,7 @@ test('MDT bridge uses the authoritative server duty export with bounded caching'
   assert.match(source, /exports\[resource\]:getOfficerDutyState\(source\)/);
   assert.match(source, /config\.DutyCacheMs/);
   assert.match(source, /result\.operator\.onDuty ~= true/);
+  assert.match(source, /result\.code = 'pilot_unavailable'/);
   assert.match(source, /result\.pilot\.onDuty ~= true/);
   assert.match(source, /config\.FailClosedWhenUnavailable ~= true/);
   assert.match(source, /_G\.CortexPolCamMdtIntegration/);
