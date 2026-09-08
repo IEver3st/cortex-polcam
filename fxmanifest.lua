@@ -5,7 +5,7 @@ lua54 'yes'
 name 'Cortex_PolCam'
 description 'Cortex PolCam - Police Helicopter Camera System'
 author 'Cortex'
-version '1.0.1'
+version '1.0.2'
 
 dependency 'cortex-lib'
 

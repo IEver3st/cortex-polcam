@@ -6,10 +6,10 @@
 
 Target tracking, thermal and night vision, ground lock, spotlight control, hover and orbit assistance, points of interest, rappelling and multi-crew camera hand-off.
 
-[![Release](https://img.shields.io/github/v/release/IEver3st/polcam?display_name=tag&sort=semver)](../../releases/latest)
+[![Release](https://img.shields.io/github/v/release/IEver3st/cortex-polcam?display_name=tag&sort=semver)](../../releases/latest)
 [![FiveM](https://img.shields.io/badge/platform-FiveM-F40552?logo=fivem)](https://fivem.net/)
 [![Lua](https://img.shields.io/badge/Lua-5.4-2C2D72?logo=lua)](https://www.lua.org/)
-[![Licence](https://img.shields.io/github/license/IEver3st/polcam)](./LICENSE)
+[![Licence](https://img.shields.io/github/license/IEver3st/cortex-polcam)](./LICENSE)
 
 [Download](../../releases/latest) · [Configuration](#configuration) · [Exports](#exports)
 
@@ -143,7 +143,7 @@ Restart the server and test the camera in a configured helicopter model.
 | Cycle vision mode | `V` |
 | Lock or unlock target | `SPACE` |
 | Lock camera to ground | `T` |
-| Place point of interest | `G` |
+| Place point of interest | `B` |
 | Delete nearest marker | `DELETE` |
 | Open debug tools | `F10` |
 
